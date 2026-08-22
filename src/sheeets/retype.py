@@ -245,14 +245,18 @@ def retype(
         write_extraction(extraction, draft, setup=PageSetup(staff_mm=omr_staff_mm),
                          heading=False)
 
+    warnings: list[str] = []
     # What the page itself says about its bars, where it is a part and says
     # anything: the printed bar numbers, the multi-measure rest counts, and how
     # many bars each system holds.  Read before recognition because the count
     # is worth reporting whether or not an engine is any good.
-    facts = barnum.survey(extraction.detected) if _is_a_part(extraction) else []
+    facts = barnum.survey(extraction.detected, _staff_of_page(extraction))
     if not _numbers_are_worth_using(facts):
         facts, wanted = [], {}
     else:
+        for line in _drop_what_the_page_denies(facts):
+            say(line)
+            warnings.append(line)
         wanted = barnum.bars_wanted(facts)
     bars_by_page = count_bars_by_page(extraction)
     if facts:
@@ -278,7 +282,6 @@ def retype(
     # the middle of a phrase with no clef, and the engine has nothing to anchor
     # on.  Measured on this score, reading the score pages found nearly twice
     # as many measures as reading the part draft.
-    warnings: list[str] = []
     marks_of_page: dict[int, list[tuple[int, str]]] = {}
     if read_from == "score":
         staff_of_page = {
@@ -564,17 +567,18 @@ def _brief(exc: Exception) -> str:
     return text[-1][:200] if text else exc.__class__.__name__
 
 
-def _is_a_part(extraction: Extraction) -> bool:
-    """Is this source a part rather than a score?
+def _staff_of_page(extraction: Extraction) -> dict[int, int]:
+    """Which staff of each page the part is being cut from.
 
-    One staff per system is what makes a part a part, and it is also what makes
-    the page's own bar numbers and multi-measure rest counts belong to the
-    music being extracted.  On a score they belong to whichever instrument is
-    printed at the top of the system, which is not the one being cut out, so
-    reading them there would be worse than not reading them at all.
+    The multi-measure rests have to be read on *that* staff.  A bar number does
+    not: it is printed once over the top of the system and it counts the same
+    bars for every instrument under it, which is why this works on a score and
+    not only on a part.
     """
-    systems = [s for page in extraction.detected for s in page.systems]
-    return bool(systems) and all(len(s.staves) == 1 for s in systems)
+    return {
+        segment.band.page_index: segment.band.staff_index
+        for segment in extraction.segments
+    }
 
 
 def _fit_counts(read: list[int | None], target: int) -> tuple[list[int] | None, str]:
@@ -666,6 +670,18 @@ def _reconcile(tree, facts, wanted, page_index: int) -> list[str]:
         where = f"page {page_index + 1} system {fact.system_index + 1}"
         if span[1] - span[0] == want:
             continue
+        if not _page_agrees(want, fact):
+            # The bar numbers are read, and a misread one is a plausible
+            # number in the wrong place: "14" read as "4" on a score page makes
+            # the page before it three bars long and the page after it
+            # twenty-four, and both would be "repaired" into the part.  The
+            # barlines are an independent witness — they were counted off the
+            # same page before any of this — so a span they contradict is not
+            # acted on at all.
+            notes.append(f"{where}: the bar numbers say {want} bar(s) and the "
+                         f"barlines on the page say about {fact.written}; "
+                         f"the numbers are not used here")
+            continue
         if len(printed) != fact.written:
             notes.append(f"{where}: the page has {fact.written} written bar(s) and the "
                          f"recognition {len(printed)}; the printed bar numbers say "
@@ -708,6 +724,59 @@ def _pad(tree, span, want: int, where: str, notes: list[str]) -> None:
         score_xml.pad_system(tree, span, short)
         notes.append(f"{where}: {short} bar(s) the page has and the recognition does "
                      f"not; put in as rests so the numbering stays right — proofread them")
+
+
+def _drop_what_the_page_denies(facts) -> list[str]:
+    """Throw away a bar number that makes nonsense of the systems around it.
+
+    A misread number is a plausible number in the wrong place, and it spoils
+    *two* spans, not one: "14" read as "4" on a score page makes the page
+    before it three bars long and the page after it twenty-four.  Both are
+    contradicted by the barlines on those pages, and a number contradicted on
+    both sides is the number that is wrong.
+
+    One side failing is not enough — the last system of a page legitimately
+    disagrees when the barline count is poor — so both are required.
+    """
+    notes: list[str] = []
+    known = [f for f in facts if f.number is not None]
+    for before, here, after in zip(known, known[1:], known[2:]):
+        if None in (before.number, here.number, after.number):
+            continue                      # one of them has already been dropped
+        incoming = here.number - before.number
+        outgoing = after.number - here.number
+        if incoming > 0 and _page_agrees(incoming, before):
+            continue
+        if outgoing > 0 and _page_agrees(outgoing, here):
+            continue
+        notes.append(f"bar number {here.number} on page {here.page_index + 1}: "
+                     f"the pages either side of it do not hold {incoming} and "
+                     f"{outgoing} bars; dropped")
+        here.number = None
+    return notes
+
+
+def _page_agrees(want: int, fact, slack: float = 0.2) -> bool:
+    """Does the barline count support what the bar numbers claim?
+
+    A multi-measure rest is one bar of paper and many bars of music, so the two
+    are compared after the rests are taken into account: a system of nine
+    written bars, six of them rests totalling ninety-five, holds ninety-eight
+    bars, and the barlines should show nine.  Counting barlines is only an
+    estimate — it ran about three per cent over on a nineteen-stave score — so
+    the test is loose.  It is not there to check arithmetic; it is there to
+    catch a bar number read as something else entirely.
+    """
+    if not fact.written:
+        return False
+    if any(count is None for count in fact.rests):
+        hidden = 0                       # unknown; the rest of the sum decides
+        for count in fact.rests:
+            hidden += (count - 1) if count else 0
+        return want >= fact.written - len(fact.rests) + hidden
+    hidden = sum(count - 1 for count in fact.rests)
+    expected = want - hidden
+    return abs(expected - fact.written) <= max(2, slack * fact.written)
 
 
 def _numbers_are_worth_using(facts, share: float = 0.6, least: int = 3) -> bool:

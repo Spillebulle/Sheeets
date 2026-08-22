@@ -84,21 +84,36 @@ def _clusters(
         pieces.append((int(xs.start), int(ys.start), int(width), int(height)))
     if not pieces:
         return []
-    pieces.sort()
-    groups: list[list[tuple[int, int, int, int]]] = [[pieces[0]]]
-    for piece in pieces[1:]:
-        last = groups[-1][-1]
-        near = piece[0] - (last[0] + last[2]) <= 0.9 * space
-        # Digits of one number share a baseline.  Without that condition the
-        # "323" above one system swept up the "(tr)" printed beside it and a
-        # cluster two lines deep was thrown away as too tall, so the system had
-        # no number at all — and a system with no number is a system whose bars
-        # cannot be checked.
-        level = abs((piece[1] + piece[3] / 2) - (last[1] + last[3] / 2)) <= 0.7 * space
-        if near and level:
-            groups[-1].append(piece)
+    # Digits of one number share a baseline, and they have to be grouped by
+    # that *first*.  Grouping left to right and rejecting a neighbour on a
+    # different line looks equivalent and is not: on a score page the "102"
+    # above the staff has a notehead between its "10" and its "2", a few
+    # pixels lower, and walking in x order the notehead ends the group and
+    # orphans the 2.  The number then reads 10, which is a plausible bar
+    # number and wrong.  Bucket by baseline, then walk each bucket.
+    by_height = sorted(pieces, key=lambda piece: piece[1] + piece[3] / 2)
+    rows: list[list[tuple[int, int, int, int]]] = [[by_height[0]]]
+    for piece in by_height[1:]:
+        last = rows[-1][-1]
+        # A chain, not a grid: bucketing centres into fixed bands splits a
+        # number whose digits happen to straddle a boundary, and two digits of
+        # the same number can sit a pixel or two apart vertically.
+        if (piece[1] + piece[3] / 2) - (last[1] + last[3] / 2) <= 0.5 * space:
+            rows[-1].append(piece)
         else:
-            groups.append([piece])
+            rows.append([piece])
+    groups: list[list[tuple[int, int, int, int]]] = []
+    for row in rows:
+        row = sorted(row)
+        run = [row[0]]
+        for piece in row[1:]:
+            last = run[-1]
+            if piece[0] - (last[0] + last[2]) <= 0.9 * space:
+                run.append(piece)
+            else:
+                groups.append(run)
+                run = [piece]
+        groups.append(run)
     out = []
     for group in groups:
         gx0 = min(p[0] for p in group)
@@ -133,7 +148,11 @@ def _clusters(
 # crops read 7 every time.  Two scales are tried and the answers voted.
 NUMBER_MODES = ("8", "13")
 COUNT_MODES = ("7",)
-SCALES = (2, 4)
+# Enlarge to about this tall, and again half as much again.  The number that
+# matters is the height on screen, not the multiplier: a score's bar number is
+# eighteen pixels tall and a part's rest count is thirty-six, so a fixed
+# multiplier reads one of them well and the other badly.
+TARGET_HEIGHTS = (150, 230)
 
 
 def _ocr_digits(
@@ -149,8 +168,13 @@ def _ocr_digits(
     from PIL import Image
 
     answers: list[str] = []
+    scales: list[int] = []
+    for want in TARGET_HEIGHTS:            # nearest the first target first
+        scale = max(2, int(round(want / max(1, inside.shape[0]))))
+        if scale not in scales:
+            scales.append(scale)
     with tempfile.TemporaryDirectory(prefix="sheeets-barnum-") as tmp:
-        for scale in SCALES:
+        for scale in scales:
             picture = Image.fromarray(inside)
             picture = picture.resize(
                 (picture.width * scale, picture.height * scale), Image.LANCZOS
@@ -170,7 +194,11 @@ def _ocr_digits(
     answers = [a for a in answers if a]
     if not answers:
         return ""
-    return max(set(answers), key=lambda a: (answers.count(a), -len(a)))
+    # Most often given, and on a tie the one from the first setting tried,
+    # which is the enlargement nearest the size tesseract reads best.  Tying
+    # on length instead prefers the *shorter* answer, and the common failure
+    # is a digit dropped: "363" against "36" went the wrong way every time.
+    return max(set(answers), key=lambda a: (answers.count(a), -answers.index(a)))
 
 
 def read_candidates(
@@ -386,26 +414,37 @@ class SystemFacts:
             self.rest_bars = []
 
 
-def survey(detected_pages, threshold: int = 160) -> list[SystemFacts]:
+def survey(detected_pages, staff_of_page=None, threshold: int = 160) -> list[SystemFacts]:
     """Read every system's printed bar number and multi-measure rest counts.
 
     The two are read together because they check each other: the numbers say
     how many bars a system holds, the rests say where those bars are hiding,
     and a page where the two agree can be trusted without a second opinion.
+
+    They are read in *different places*, and the difference is the whole reason
+    this works on a score as well as on a part. A bar number belongs to the
+    **system** — it is printed once, over the top staff, and it is as true of
+    the percussion at the bottom as of the cornets at the top. A multi-measure
+    rest belongs to **one staff**, so it is read on the staff being extracted,
+    which `staff_of_page` names. Read the rests off the top staff of a score
+    and they would be the first instrument's, which is the mistake this
+    argument exists to avoid.
     """
     per_system: list[tuple[int, int, list[Candidate]]] = []
     facts: list[SystemFacts] = []
     for page in detected_pages:
         index = page.page.index
+        mine = (staff_of_page or {}).get(index, 0)
         for system_index, system in enumerate(page.systems):
             if not system.staves:
                 continue
-            staff = system.staves[0]
+            top = system.staves[0]
             per_system.append((
                 index, system_index,
-                read_candidates(page.image, staff.x0, int(staff.top), staff.space,
+                read_candidates(page.image, top.x0, int(top.top), top.space,
                                 threshold),
             ))
+            staff = system.staves[mine if 0 <= mine < len(system.staves) else -1]
             rests = multi_rests(page.image, staff, threshold)
             # Which written bar each rest sits in.  `system_barlines` returns
             # the barlines it can see, and the one at the very start of a
