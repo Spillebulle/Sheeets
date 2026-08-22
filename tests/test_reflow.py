@@ -176,3 +176,34 @@ def test_a_cut_does_not_slice_what_is_written_over_the_barline():
     clean = np.full((bottom + 120, 1000), 255, dtype=np.uint8)
     assert _clear_of_markings([(0, 500), (500, 1000)], clean, top, bottom, space) == \
         [(0, 500), (500, 1000)]
+
+
+def test_a_stem_on_a_lone_staff_is_not_a_barline():
+    """A part is one staff to a system, so there is nothing to vote with — and
+    a stem from the top line to the bottom passes the full-height test.  On a
+    real drum-kit part that made 518 barlines out of about seventy bars."""
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    from sheeets.detect.projection import ProjectionDetector
+    from sheeets.model import PageImage
+    from sheeets.reflow import system_barlines
+
+    space = 16
+    image = Image.new("L", (1600, 300), 255)
+    draw = ImageDraw.Draw(image)
+    top = 120
+    for k in range(5):
+        draw.line([(150, top + k * space), (1500, top + k * space)], fill=0, width=2)
+    for x in (150, 600, 1050, 1500):
+        draw.line([(x, top), (x, top + 4 * space)], fill=0, width=3)
+    # A stem the full height of the staff, with its notehead beside it.
+    draw.line([(820, top), (820, top + 4 * space)], fill=0, width=3)
+    draw.ellipse([823, top + 4 * space - 8, 823 + 20, top + 4 * space + 4], fill=0)
+
+    page = ProjectionDetector().detect(PageImage(index=0, array=np.asarray(image), dpi=300))
+    system = page.systems[0]
+    assert len(system.staves) == 1
+    found = system_barlines(page, system)
+    assert len(found) == 4, found
+    assert all(abs(f - 820) > 20 for f in found)
