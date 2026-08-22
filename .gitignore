@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+
+# Scores are copyrighted and large; keep them out of the repo.
+scores/
+out/
+*.pdf
