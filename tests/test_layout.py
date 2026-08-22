@@ -87,3 +87,40 @@ def test_a_barline_anywhere_joins_a_system_not_just_at_the_left_edge():
     draw.line([(700, tops[0]), (700, tops[1] + 4 * space)], fill=0, width=3)
     page = ProjectionDetector().detect(PageImage(index=0, array=np.asarray(image), dpi=300))
     assert [len(s) for s in page.systems] == [2]
+
+
+def test_a_score_that_breaks_its_barlines_between_families_is_still_one_system():
+    """This score breaks the barline between the basses and the percussion.
+
+    On two of its 27 pages nothing bridges that gap, and the ink alone split a
+    19-stave system into 14 and 5. Systems on a page carry the same
+    instruments, so groups of different sizes mean the split is wrong.
+    """
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    from sheeets.detect.projection import ProjectionDetector
+    from sheeets.model import PageImage
+
+    space = 11
+    image = Image.new("L", (1400, 900), 255)
+    draw = ImageDraw.Draw(image)
+    tops = [100, 250, 400, 600, 750]        # a wider gap before the last two
+    for y in tops:
+        for k in range(5):
+            draw.line([(150, y + k * space), (1300, y + k * space)], fill=0, width=2)
+    # Barlines join staves 1-3 and, separately, staves 4-5: a family break.
+    for x in (150, 700, 1300):
+        draw.line([(x, tops[0]), (x, tops[2] + 4 * space)], fill=0, width=3)
+        draw.line([(x, tops[3]), (x, tops[4] + 4 * space)], fill=0, width=3)
+    page = ProjectionDetector().detect(PageImage(index=0, array=np.asarray(image), dpi=300))
+    # 3 and 2 are not equal, so the break is a broken barline, not a boundary.
+    assert [len(s) for s in page.systems] == [5]
+
+
+def test_even_groups_are_believed():
+    from sheeets.layout import _groups_are_even
+
+    assert _groups_are_even([False, True, False, True, False])   # 2,2,2
+    assert _groups_are_even([True, True, True])                  # 1,1,1,1
+    assert not _groups_are_even([False, False, True, False])     # 3,2

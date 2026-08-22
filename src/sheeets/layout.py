@@ -63,6 +63,24 @@ def group_systems(
     staves: list[Staff], space: float, page_index: int, factor: float = 2.0,
     image=None,
 ) -> list[System]:
+    """Group staves into systems.
+
+    Three signals, and only together do they work:
+
+    * **Ink.**  A system is joined by barlines running through its staves.
+      This is what tells a part (nothing joins anything) from a score.
+    * **Equal groups.**  Systems on a page carry the same instruments, so they
+      hold the same number of staves.  This is what rescues a score that
+      *breaks* its barlines between instrument families — this one does,
+      between the basses and the percussion — where the ink alone splits a
+      19-stave system into 14 and 5.  Unequal groups mean the split is wrong.
+    * **Gap size**, only as a fallback when there is no image to look at.
+
+    Gap size cannot do the job itself and the fleet shows why twice over: on a
+    part every gap is identical, and on the three-player page the gap between
+    systems (134 px) is the same as the gap inside one (133 px).  There the ink
+    is the only evidence there is.
+    """
     if not staves:
         return []
     staves = sorted(staves, key=lambda s: s.top)
@@ -70,28 +88,53 @@ def group_systems(
         staves[0].index = 0
         return [System(staves=list(staves), page_index=page_index, index=0)]
 
-    gaps = np.array([b.top - a.bottom for a, b in zip(staves, staves[1:])], dtype=float)
+    gaps = [b.top - a.bottom for a, b in zip(staves, staves[1:])]
     typical = float(np.median(gaps))
     threshold = max(typical * factor, space * 6.0)
 
+    if image is None:
+        breaks = [gap > threshold for gap in gaps]
+    else:
+        breaks = [not joined(image, upper, lower)
+                  for upper, lower in zip(staves, staves[1:])]
+        if all(breaks):
+            pass  # a part: every staff stands alone
+        elif not _groups_are_even(breaks):
+            # The ink says split, but into groups of different sizes — which
+            # systems on one page never are.  A broken barline inside a system,
+            # not a boundary.
+            breaks = [gap > threshold for gap in gaps]
+
     systems: list[System] = []
     current: list[Staff] = [staves[0]]
-    for gap, upper, staff in zip(gaps, staves, staves[1:]):
-        if image is not None:
-            starts_new = not joined(image, upper, staff)
-        else:
-            starts_new = gap > threshold
+    for index, starts_new in enumerate(breaks):
         if starts_new:
             systems.append(System(staves=current, page_index=page_index, index=len(systems)))
-            current = [staff]
+            current = [staves[index + 1]]
         else:
-            current.append(staff)
+            current.append(staves[index + 1])
     systems.append(System(staves=current, page_index=page_index, index=len(systems)))
 
     for system in systems:
         for i, staff in enumerate(system.staves):
             staff.index = i
     return systems
+
+
+def _groups_are_even(breaks: list[bool]) -> bool:
+    """Would splitting here give systems of the same size?"""
+    sizes: list[int] = []
+    run = 1
+    for starts_new in breaks:
+        if starts_new:
+            sizes.append(run)
+            run = 1
+        else:
+            run += 1
+    sizes.append(run)
+    if len(sizes) < 2:
+        return True
+    return max(sizes) == min(sizes)
 
 
 def staff_counts(systems: list[System]) -> list[int]:
