@@ -116,6 +116,61 @@ def find_marks(image: np.ndarray, top_row: int, space: float, **kwargs) -> list[
     return marks
 
 
+def tidy_sequence(texts: list[str]) -> tuple[list[str], list[str]]:
+    """Repair misreads, and drop strays, using the one thing marks guarantee.
+
+    Rehearsal letters run in order.  That is a stronger fact than any single
+    OCR result at this size, where the classic confusions all bite: C read as
+    G, O read as zero, I as one, S as five.  Both of the first two happened on
+    this score, and a stray box on the title page read as "Y" and sat in front
+    of the run.
+
+    So the longest ascending run wins: every position it covers is corrected to
+    the letter that position demands, and anything before it that does not fit
+    is dropped as a shape that was never a rehearsal mark.  If no run can be
+    found — a score numbering its marks 1, 2, 3, or one that genuinely skips
+    letters — nothing is touched, because then the sequence is not evidence.
+
+    Returns the letters (strays removed) and a note of every change.
+    """
+    if len(texts) < 3:
+        return list(texts), []
+
+    best = None  # (matches, start index)
+    for start in range(len(texts)):
+        letter = texts[start]
+        if len(letter) != 1 or not letter.isalpha():
+            continue
+        last = chr(ord(letter) + len(texts) - start - 1)
+        if last > "Z":
+            continue
+        matches = sum(
+            1 for i in range(start, len(texts))
+            if texts[i] == chr(ord(letter) + i - start)
+        )
+        if best is None or matches > best[0]:
+            best = (matches, start)
+
+    if best is None:
+        return list(texts), []
+    matches, start = best
+    covered = len(texts) - start
+    if matches < max(3, 0.6 * covered):
+        return list(texts), []
+
+    anchor = ord(texts[start])
+    kept: list[str] = []
+    notes: list[str] = []
+    for index in range(start):
+        notes.append(f"dropped {texts[index]!r}: it is not part of the run")
+    for index in range(start, len(texts)):
+        want = chr(anchor + index - start)
+        if texts[index] != want:
+            notes.append(f"read {texts[index]!r} where the sequence wants {want!r}; corrected")
+        kept.append(want)
+    return kept, notes
+
+
 def measure_of(mark: Mark, barlines: list[int]) -> int:
     """Which bar of the system a mark belongs to, counting from 0.
 

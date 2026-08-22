@@ -455,6 +455,39 @@ def smooth_seams(tree: ET.ElementTree) -> list[str]:
     return notes
 
 
+def measure_length(measure: ET.Element) -> int:
+    """How long a measure actually is, in divisions.
+
+    A bar with two voices is not the sum of its notes.  MusicXML writes the
+    second voice by stepping the cursor *back* with `<backup>` and laying it
+    down again, so adding up every `<duration>` counts the bar twice — which is
+    exactly what happened on the percussion part, where 73 bars carry two
+    voices and every one of them was reported as "does not add up".
+
+    Walk the cursor instead, and the bar is how far it ever reached.
+    """
+    cursor = 0
+    longest = 0
+    for element in measure:
+        if element.tag == "note":
+            if element.find("chord") is not None:
+                continue  # a chord sounds with the note before it
+            duration = element.findtext("duration")
+            if duration and duration.strip().lstrip("-").isdigit():
+                cursor += int(duration)
+                longest = max(longest, cursor)
+        elif element.tag == "backup":
+            duration = element.findtext("duration")
+            if duration and duration.strip().isdigit():
+                cursor -= int(duration)
+        elif element.tag == "forward":
+            duration = element.findtext("duration")
+            if duration and duration.strip().isdigit():
+                cursor += int(duration)
+                longest = max(longest, cursor)
+    return longest
+
+
 @dataclass
 class Repair:
     """One structural change, and whether it was a guess.
@@ -510,7 +543,7 @@ def fill_incomplete(tree: ET.ElementTree) -> list[Repair]:
         if any(n.find("rest") is not None and n.find("rest").get("measure") == "yes"
                for n in notes):
             continue
-        total = sum(int(n.findtext("duration") or 0) for n in notes)
+        total = measure_length(measure)
 
         if total == 0 and not notes:
             note = ET.SubElement(measure, "note")
@@ -566,28 +599,17 @@ def check(tree: ET.ElementTree) -> list[MeasureCheck]:
                 if beats and beat_type:
                     expected = Fraction(int(beats), int(beat_type))
 
-        total = Fraction(0)
-        counted = 0
-        whole_bar_rest = False
-        for note in measure.findall("note"):
-            if note.find("chord") is not None:
-                continue  # a chord sounds with the note before it
-            counted += 1
-            rest = note.find("rest")
-            if rest is not None and rest.get("measure") == "yes":
-                # A bar's rest, or a multi-bar rest — one written measure
-                # whatever its duration says, which is how it is counted in the
-                # scan too.
-                whole_bar_rest = True
-                continue
-            duration = note.findtext("duration")
-            if duration is not None:
-                total += Fraction(int(duration), divisions * 4)
-            else:
-                kind = note.findtext("type")
-                total += Fraction(TYPE_LENGTH.get(kind, 0))
-        if whole_bar_rest and total == 0:
+        counted = sum(1 for n in measure.findall("note") if n.find("chord") is None)
+        whole_bar_rest = any(
+            n.find("rest") is not None and n.find("rest").get("measure") == "yes"
+            for n in measure.findall("note")
+        )
+        if whole_bar_rest:
+            # A bar's rest, or a multi-bar rest — one written measure whatever
+            # its duration says, which is how it is counted in the scan too.
             total = expected
+        else:
+            total = Fraction(measure_length(measure), divisions * 4)
         out.append(
             MeasureCheck(
                 number=int(measure.get("number", len(out) + 1)),

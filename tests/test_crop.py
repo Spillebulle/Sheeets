@@ -14,6 +14,8 @@ def page_with(marks) -> PageImage:
     """Two staves, plus whatever `marks` draws under the lower one."""
     image = Image.new("L", (2000, 700), 255)
     draw = ImageDraw.Draw(image)
+    # The barline down the left edge is what makes these two staves one system.
+    draw.line([(200, 150), (200, 400 + 4 * SPACE)], fill=0, width=4)
     for staff, y_top in enumerate((150, 400)):
         for k in range(5):
             draw.line([(200, y_top + k * SPACE), (1900, y_top + k * SPACE)], fill=0, width=2)

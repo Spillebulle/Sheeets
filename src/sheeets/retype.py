@@ -406,7 +406,7 @@ def _find_marks(extraction: Extraction, say) -> dict[int, list[tuple[int, str]]]
     system is not text it can pick out, but it is the most distinctive shape on
     the page.  See `sheeets.marks`.
     """
-    out: dict[int, list[tuple[int, str]]] = {}
+    places: list[tuple[int, int]] = []  # (page index, measure index)
     letters: list[str] = []
     for page in extraction.detected:
         if not page.systems:
@@ -417,10 +417,23 @@ def _find_marks(extraction: Extraction, say) -> dict[int, list[tuple[int, str]]]
         if not found:
             continue
         bars = system_barlines(page, system)
-        out[page.page.index] = [(marks_mod.measure_of(m, bars), m.text) for m in found]
-        letters.extend(m.text for m in found)
+        for mark in found:
+            places.append((page.page.index, marks_mod.measure_of(mark, bars)))
+            letters.append(mark.text)
+
+    tidied, corrections = marks_mod.tidy_sequence(letters)
+    for line in corrections:
+        say(f"rehearsal mark: {line}")
+    # A dropped stray comes off the front, so line the places up with what is
+    # left rather than with what was read.
+    places = places[len(letters) - len(tidied):]
+    letters = tidied
+
+    out: dict[int, list[tuple[int, str]]] = {}
+    for (page_index, measure_index), text in zip(places, letters):
+        out.setdefault(page_index, []).append((measure_index, text))
     if letters:
-        say("rehearsal marks found: " + " ".join(letters))
+        say("rehearsal marks: " + " ".join(letters))
     return out
 
 

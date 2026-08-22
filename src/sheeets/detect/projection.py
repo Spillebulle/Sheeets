@@ -46,6 +46,36 @@ def binarise(arr: np.ndarray, threshold: int | None = None) -> np.ndarray:
     return arr < threshold
 
 
+def binarise_local(arr: np.ndarray, window: int = 61, drop: int = 18) -> np.ndarray:
+    """Ink mask against the local background rather than one level for the page.
+
+    Needed where the printing is uneven: on the crooked part in the fleet the
+    first three systems are set in much lighter ink than the rest, and a single
+    threshold that keeps their staff lines drowns the dense systems below in
+    black.  Comparing each pixel with the average around it sees both.
+
+    It is not a free win — on a *photograph*, where the background itself
+    varies (a table, a shadow, a curled page), a wide window smears across the
+    edge of the paper and the same trick loses almost everything.  Which is why
+    the detector tries this and a plain threshold and keeps whichever finds
+    more staves, rather than choosing for the page in advance.
+    """
+    from scipy import ndimage
+
+    background = ndimage.uniform_filter(arr.astype(np.float32), size=window)
+    return arr < (background - drop)
+
+
+def ink_strategies(threshold: int | None) -> list[tuple[str, object]]:
+    """The ways of deciding what is ink, in the order they are tried."""
+    return [
+        (f"fixed {threshold}", lambda a: binarise(a, threshold)),
+        ("otsu", lambda a: binarise(a, None)),
+        ("local 61", lambda a: binarise_local(a, 61, 18)),
+        ("local 121", lambda a: binarise_local(a, 121, 15)),
+    ]
+
+
 def otsu(arr: np.ndarray) -> int:
     hist = np.bincount(arr.ravel(), minlength=256).astype(np.float64)
     total = hist.sum()
@@ -100,11 +130,32 @@ def line_candidates(
     min_width_frac: float = 0.20,
     max_thickness: float = 6.0,
     run_frac: float = 0.03,
+    drift: int = 1,
 ) -> list[LineCandidate]:
+    """Find the long thin horizontal things on a page.
+
+    `drift` lets a line wander vertically by that many pixels and still count
+    as one run.  It matters more than it sounds: a page whose skew *varies*
+    down the sheet — a sheet held slightly curved over the scanner, which is
+    most old parts — cannot be straightened by one rotation, so after deskewing
+    the far end of the page is still a fraction of a degree out.  At 0.5 degrees
+    a line stays inside one row of pixels for barely a hundred of them, the
+    run filter cuts it to pieces, and those systems vanish.  On the crooked
+    part in the fleet the top two systems of thirteen were lost exactly so.
+
+    Dilating by a pixel before the filter and masking back afterwards keeps the
+    measured thickness honest while letting a drifting line survive.
+    """
     from scipy import ndimage
 
     h, w = ink.shape
-    runs = horizontal_runs(ink, max(8, int(run_frac * w)))
+    searched = ink
+    if drift:
+        searched = ink.copy()
+        for shift in range(1, drift + 1):
+            searched[:-shift] |= ink[shift:]
+            searched[shift:] |= ink[:-shift]
+    runs = horizontal_runs(searched, max(8, int(run_frac * w))) & ink
     labels, _ = ndimage.label(runs, structure=np.ones((3, 3), dtype=int))
     out: list[LineCandidate] = []
     for k, slc in enumerate(ndimage.find_objects(labels), start=1):
@@ -161,6 +212,47 @@ def merge_fragments(
     return [(y, int(w)) for y, w in merged]
 
 
+def space_from_runs(ink: np.ndarray, sample: int = 4,
+                    low: int = 3, high: int = 80) -> float | None:
+    """Staff space, measured from the ink itself rather than from what was found.
+
+    The gaps between *detected lines* are not a safe way to measure this.  On a
+    photograph of an old part every staff line is found twice — the print has
+    spread, and the two halves come back as separate components four pixels
+    apart — so half the gaps are 4 px, the estimate collapses to 8, and the
+    comb then hunts for five lines 8 px apart and finds no staff at all on the
+    page.  That is exactly what happened to the worst scan in the fleet.
+
+    Scanning down a column instead: the most common run of ink is the thickness
+    of a staff line, and the most common run of white is the space between two
+    of them.  A staff contributes four of each and nothing else on the page is
+    as regular, so both modes are sharp.  The distance from one line to the
+    next — which is what everything downstream means by "space" — is the two
+    added together.
+    """
+    if ink.size == 0:
+        return None
+    columns = ink[:, ::sample].T  # one row per sampled column
+    padded = np.zeros((columns.shape[0], columns.shape[1] + 2), dtype=np.int8)
+    padded[:, 1:-1] = columns
+    diff = np.diff(padded, axis=1)
+    rows_start, starts = np.nonzero(diff == 1)   # ink begins
+    rows_end, ends = np.nonzero(diff == -1)      # ink ends
+    if starts.size < 2:
+        return None
+
+    thickness = ends - starts
+    thickness = thickness[(thickness >= 1) & (thickness <= 20)]
+    # Within one column, the white gap runs from the end of one ink run to the
+    # start of the next; pairs that straddle two columns are dropped.
+    white = starts[1:] - ends[:-1]
+    same = rows_start[1:] == rows_end[:-1]
+    white = white[same & (white >= low) & (white <= high)]
+    if white.size < 20 or thickness.size < 20:
+        return None
+    return float(np.argmax(np.bincount(white)) + np.argmax(np.bincount(thickness)))
+
+
 def estimate_space(ys: list[float]) -> float | None:
     """Distance between adjacent staff lines, from the gaps between candidates."""
     gaps = np.diff(sorted(ys))
@@ -174,31 +266,66 @@ def estimate_space(ys: list[float]) -> float | None:
     return float(np.median(small)) if small.size else float(np.median(gaps))
 
 
-def comb_staves(ys: list[float], space: float, tolerance: float = 0.35) -> list[list[float]]:
-    """Pick out sets of five lines at `space` apart, top-down, without reuse."""
+def comb_staves(
+    ys: list[float],
+    space: float,
+    tolerance: float = 0.40,
+    min_lines: int = 4,
+) -> list[list[float]]:
+    """Pick out staves: five lines a `space` apart, allowing for a bad scan.
+
+    Two things go wrong on real paper and both have to be tolerated, or the
+    good pages work and the poor ones return nothing at all:
+
+    * **The lines wobble.**  On a photographed part the detected positions of
+      one staff's lines came out 18, 15, 21, 17 apart where the spacing is 18.
+      Demanding exact multiples finds no staff.
+    * **A line goes missing.**  Faint print, a fold, a stave crossed by a slur:
+      four of the five are found and the fifth is not.  A staff with four lines
+      is still a staff, so four is enough to claim one — and the fifth is then
+      *computed* from the four rather than left out, because everything
+      downstream measures the band from the outer lines.
+
+    Accepting four lines could invent a staff out of unrelated ink, so the
+    lines that are found must also *fit*: a straight line through them, index
+    against position, with residuals inside a quarter of a space.
+    """
     ys = sorted(ys)
     used = [False] * len(ys)
     staves: list[list[float]] = []
+
     for i, y0 in enumerate(ys):
         if used[i]:
             continue
-        chosen = [i]
+        chosen = {0: i}
         for k in range(1, 5):
             target = y0 + k * space
-            best, best_d = None, tolerance * space
+            best, best_distance = None, tolerance * space
             for j, y in enumerate(ys):
-                if used[j] or j in chosen:
+                if used[j] or j in chosen.values():
                     continue
-                d = abs(y - target)
-                if d < best_d:
-                    best, best_d = j, d
-            if best is None:
-                break
-            chosen.append(best)
-        if len(chosen) == 5:
-            for j in chosen:
-                used[j] = True
-            staves.append([ys[j] for j in chosen])
+                distance = abs(y - target)
+                if distance < best_distance:
+                    best, best_distance = j, distance
+            if best is not None:
+                chosen[k] = best
+        if len(chosen) < min_lines:
+            continue
+
+        # A straight line through the ones that were found; it both checks the
+        # fit and supplies whichever line is missing.
+        indices = sorted(chosen)
+        positions = [ys[chosen[k]] for k in indices]
+        slope, intercept = np.polyfit(indices, positions, 1)
+        fitted = [slope * k + intercept for k in range(5)]
+        residual = max(abs(ys[chosen[k]] - fitted[k]) for k in indices)
+        if residual > 0.25 * space or not (0.75 * space <= slope <= 1.25 * space):
+            continue
+
+        for j in chosen.values():
+            used[j] = True
+        staves.append(fitted)
+
     return staves
 
 
@@ -214,6 +341,7 @@ class ProjectionDetector:
         run_frac: float = 0.03,
         deskew: bool = True,
         system_gap_factor: float = 2.0,
+        try_harder: bool = True,
     ) -> None:
         self.threshold = threshold
         self.min_width_frac = min_width_frac
@@ -221,18 +349,19 @@ class ProjectionDetector:
         self.run_frac = run_frac
         self.deskew = deskew
         self.system_gap_factor = system_gap_factor
+        self.try_harder = try_harder
 
     # -- internals ---------------------------------------------------------
-    def _candidates(self, arr: np.ndarray) -> list[LineCandidate]:
+    def _candidates(self, arr: np.ndarray, ink=None) -> list[LineCandidate]:
         return line_candidates(
-            binarise(arr, self.threshold),
+            binarise(arr, self.threshold) if ink is None else ink(arr),
             min_width_frac=self.min_width_frac,
             max_thickness=self.max_thickness,
             run_frac=self.run_frac,
         )
 
-    def _flatten(self, arr: np.ndarray) -> tuple[np.ndarray, list[LineCandidate], float]:
-        cands = self._candidates(arr)
+    def _flatten(self, arr: np.ndarray, ink=None) -> tuple[np.ndarray, list[LineCandidate], float]:
+        cands = self._candidates(arr, ink)
         if not cands or not self.deskew:
             return arr, cands, 0.0
         slope = float(np.median([c.b for c in cands]))
@@ -242,7 +371,7 @@ class ProjectionDetector:
         best = (arr, cands, 0.0, abs(slope))
         for sign in (1, -1):
             turned = rotate(arr, sign * degrees)
-            turned_cands = self._candidates(turned)
+            turned_cands = self._candidates(turned, ink)
             if not turned_cands:
                 continue
             residual = abs(float(np.median([c.b for c in turned_cands])))
@@ -256,13 +385,45 @@ class ProjectionDetector:
 
     # -- the contract ------------------------------------------------------
     def detect(self, page: PageImage) -> DetectedPage:
-        image, cands, skew = self._flatten(page.array)
+        """Find the staves, trying more than one idea of what counts as ink.
+
+        Every strategy is tried and the one that finds the most staves wins,
+        ties going to the page that looks most regular.  Stopping early at the
+        first "reasonable" answer was tried and is wrong: on the crooked part
+        the plain threshold finds eleven evenly spaced staves and looks
+        entirely healthy — but the page has thirteen, and the two it drops are
+        the ones printed in lighter ink.  Evenly spaced is not the same as
+        complete, and nothing cheap tells them apart.
+
+        The cost is four passes over the page instead of one.  That is a few
+        seconds each, paid once per part, against silently losing two systems.
+        """
+        attempts: list[tuple[int, bool, DetectedPage, str]] = []
+        for name, ink in ink_strategies(self.threshold):
+            result = self._detect_with(page, ink, name)
+            attempts.append((len(result.staves), _looks_regular(result), result, name))
+            if not self.try_harder:
+                break
+        if not attempts:  # pragma: no cover - ink_strategies is never empty
+            return DetectedPage(page=page, image=page.array, systems=[], space=0.0,
+                                skew_deg=0.0, notes={"reason": "nothing tried"})
+        count, _regular, result, name = max(attempts, key=lambda a: (a[0], a[1]))
+        result.notes["ink"] = name
+        result.notes["ink_tried"] = [a[3] for a in attempts]
+        return result
+
+    def _detect_with(self, page: PageImage, ink, name: str) -> DetectedPage:
+        image, cands, skew = self._flatten(page.array, ink)
         if not cands:
             return DetectedPage(page=page, image=image, systems=[], space=0.0, skew_deg=skew,
                                 notes={"reason": "no line-shaped ink found"})
         x_ref = image.shape[1] / 2
         rough = [c.y_at(x_ref) for c in cands]
-        space = estimate_space(rough)
+        # Measured off the ink first; the gaps between detected lines are only
+        # a fallback, because a line found twice halves that estimate.
+        space = space_from_runs(ink(image))
+        if space is None or space < 3:
+            space = estimate_space(rough)
         if space is None:
             return DetectedPage(page=page, image=image, systems=[], space=0.0, skew_deg=skew,
                                 notes={"reason": "could not estimate staff spacing"})
@@ -274,7 +435,8 @@ class ProjectionDetector:
             Staff(lines=g, space=float(np.median(np.diff(g))), x0=x0, x1=x1)
             for g in groups
         ]
-        systems = group_systems(staves, space, page.index, factor=self.system_gap_factor)
+        systems = group_systems(staves, space, page.index,
+                                factor=self.system_gap_factor, image=image)
         return DetectedPage(
             page=page,
             image=image,
@@ -283,6 +445,27 @@ class ProjectionDetector:
             skew_deg=skew,
             notes={"line_candidates": len(cands), "merged_lines": len(merged)},
         )
+
+
+def _looks_regular(result: DetectedPage, tolerance: float = 0.25) -> bool:
+    """Do the staves sit at even intervals, as engraved music does?
+
+    This is the test for "no need to try anything else".  Music is laid out on
+    a grid; a page where the found staves are evenly spaced has almost
+    certainly been read correctly, and a page where they are not has usually
+    lost some.
+    """
+    staves = result.staves
+    if len(staves) < 3:
+        return False
+    tops = sorted(s.top for s in staves)
+    gaps = np.diff(tops)
+    if gaps.size == 0:
+        return False
+    typical = float(np.median(gaps))
+    if typical <= 0:
+        return False
+    return bool(np.all(np.abs(gaps - typical) <= tolerance * typical))
 
 
 register("projection", ProjectionDetector)

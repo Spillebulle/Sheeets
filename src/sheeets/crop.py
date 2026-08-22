@@ -208,6 +208,8 @@ def band_for(
     x0 = int(max(0, gutter_left, round(x0)))
     x1 = int(min(width, gutter_right, round(music_x1 + right_spaces * space)))
 
+    if x1 - x0 < 2 or y1 - y0 < 2:
+        return None
     return Band(
         page_index=page.page.index,
         system_index=system.index,

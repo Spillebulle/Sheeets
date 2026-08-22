@@ -26,12 +26,25 @@ def draw_page(
     skew_deg: float = 0.0,
     note_rows: tuple[int, ...] = (1, 3),
     line_width: int = 2,
+    joined: bool = True,
 ) -> Image.Image:
+    """Draw a page of staves.
+
+    `joined=True` draws the barline that runs down the left edge through every
+    staff, which is what makes a set of staves a *system* — a score.  With
+    `joined=False` each staff stands alone, which is what a part looks like:
+    many one-staff systems down the page.
+    """
     image = Image.new("L", (width, height), 255)
     draw = ImageDraw.Draw(image)
     x0, x1 = left, width - right_margin
     staff_height = 4 * space
     gap = (height - 2 * top - staves * staff_height) / max(staves - 1, 1)
+
+    if joined:
+        first = top
+        last = top + (staves - 1) * (staff_height + gap) + staff_height
+        draw.line([(x0, first), (x0, last)], fill=0, width=4)
 
     for s in range(staves):
         y_top = top + s * (staff_height + gap)

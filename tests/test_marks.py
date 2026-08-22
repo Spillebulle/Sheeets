@@ -61,3 +61,24 @@ def test_a_mark_belongs_to_the_bar_it_sits_over():
     assert measure_of(Mark("B", 950, 0, 40, 40), barlines) == 2
     assert measure_of(Mark("C", 50, 0, 40, 40), barlines) == 0
     assert measure_of(Mark("D", 50, 0, 40, 40), []) == 0
+
+
+def test_the_sequence_repairs_a_misread_letter():
+    from sheeets.marks import tidy_sequence
+
+    # C read as G and O read as zero — both happened on the real score.
+    got, notes = tidy_sequence(["A", "B", "G", "D", "E", "F", "G", "H"])
+    assert got == list("ABCDEFGH")
+    assert len(notes) == 1 and "wants 'C'" in notes[0]
+
+    got, notes = tidy_sequence(["L", "M", "N", "0"])
+    assert got == list("LMNO")
+
+
+def test_a_sequence_that_is_not_a_run_is_left_alone():
+    from sheeets.marks import tidy_sequence
+
+    # Marks numbered rather than lettered, or a score that skips: no evidence.
+    for reads in (["1", "2", "3", "4"], ["A", "C", "F", "K"], ["A", "B"]):
+        got, notes = tidy_sequence(reads)
+        assert got == reads and notes == []

@@ -204,13 +204,14 @@ def segments_for_band(
         left = a
         if i == 0 and not keep_label_on_first:
             left = max(a, label_width)
+        piece = band_image[:, left:b]
+        if piece.size == 0 or piece.shape[0] < 2 or piece.shape[1] < 2:
+            # A cut can land on the very edge of a band — a staff detected at
+            # the margin of a bad scan, a chunk with nothing in it.  An empty
+            # piece is not an error worth stopping for, but it must not reach
+            # the exporter, which cannot write a zero-pixel image.
+            continue
         out.append(
-            Segment(
-                image=band_image[:, left:b],
-                band=band,
-                chunk=i,
-                of=len(pieces),
-                dpi=dpi,
-            )
+            Segment(image=piece, band=band, chunk=i, of=len(pieces), dpi=dpi)
         )
     return out

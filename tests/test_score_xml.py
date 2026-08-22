@@ -167,3 +167,36 @@ def test_a_bar_rest_that_is_not_a_bar_long_is_corrected(tmp_path):
     repairs = score_xml.sanitize(tree)
     assert any("bar rest lasted 12 where the bar is 8" in r for r in repairs)
     assert tree.getroot().findtext(".//note/duration") == "8"
+
+
+TWO_VOICES = """<?xml version="1.0"?>
+<score-partwise version="4.0">
+  <part-list><score-part id="P1"><part-name>Perc</part-name></score-part></part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes><divisions>2</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+      <note><voice>1</voice><duration>8</duration><type>whole</type></note>
+      <backup><duration>8</duration></backup>
+      <note><voice>2</voice><duration>8</duration><type>whole</type></note>
+    </measure>
+  </part>
+</score-partwise>
+"""
+
+
+def test_two_voices_are_one_bar_not_two(tmp_path):
+    # 73 bars of the real percussion part carry a second voice; adding up every
+    # duration counted each of them twice and called them all broken.
+    path = tmp_path / "voices.musicxml"
+    path.write_text(TWO_VOICES)
+    tree = score_xml.merge([path])
+    check = score_xml.check(tree)[0]
+    assert check.ok, (check.beats, check.expected)
+    assert score_xml.measure_length(tree.getroot().find(".//measure")) == 8
+
+
+def test_a_two_voice_bar_is_not_padded(tmp_path):
+    path = tmp_path / "voices.musicxml"
+    path.write_text(TWO_VOICES)
+    tree = score_xml.merge([path])
+    assert score_xml.fill_incomplete(tree) == []

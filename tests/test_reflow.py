@@ -90,6 +90,7 @@ def test_a_barline_is_what_crosses_the_system_not_one_staff():
     image = Image.new("L", (1600, 620), 255)
     draw = ImageDraw.Draw(image)
     tops = [80, 260, 440]
+    draw.line([(150, tops[0]), (150, tops[-1] + 4 * space)], fill=0, width=4)
     for y in tops:
         for k in range(5):
             draw.line([(150, y + k * space), (1500, y + k * space)], fill=0, width=2)
@@ -104,3 +105,17 @@ def test_a_barline_is_what_crosses_the_system_not_one_staff():
     found = system_barlines(page, system)
     assert len(found) == 4, found
     assert all(min(abs(f - x) for x in (150, 600, 1050, 1500)) <= 4 for f in found)
+
+
+def test_a_zero_width_piece_is_dropped_not_exported():
+    """A staff detected at the very edge of a bad scan produced an empty
+    band, and the PDF exporter died on it with "cannot write empty image"."""
+    import numpy as np
+
+    from sheeets.model import Band
+    from sheeets.reflow import segments_for_band
+
+    band = Band(page_index=0, system_index=0, staff_index=0, x0=0, y0=0,
+                x1=0, y1=10, space=11.0, music_x0=0)
+    empty = np.full((10, 0), 255, np.uint8)
+    assert segments_for_band(empty, band, 0, 5, max_source_width=100, dpi=300) == []
