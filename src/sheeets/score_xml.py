@@ -704,21 +704,47 @@ def set_multi_rest(tree: ET.ElementTree, index: int, count: int) -> int:
 
 
 def _copy_bar_rest(template: ET.Element) -> ET.Element:
-    """A fresh empty measure modelled on one of the rest's own bars."""
+    """A fresh empty measure modelled on one of the rest's own bars.
+
+    Nothing but the rest survives.  Leaving an empty `<measure-style/>` behind
+    was enough to end the multi-measure rest as far as musicxml2ly is
+    concerned, so a twenty-four bar rest came out as twenty-four empty bars
+    with barlines between them — which is not what a player counts from.
+    """
     copy = ET.fromstring(ET.tostring(template))
-    for tag in ("print", "barline"):
+    for tag in ("print", "barline", "attributes", "direction"):
         for child in list(copy.findall(tag)):
             copy.remove(child)
-    for holder in copy.iter():
-        for child in list(holder):
-            if child.tag == "multiple-rest":
-                holder.remove(child)
     return copy
 
 
 def _renumber(part: ET.Element) -> None:
     for number, measure in enumerate(part.findall("measure"), start=1):
         measure.set("number", str(number))
+
+
+def show_bar_rests(tree: ET.ElementTree) -> int:
+    """Let the whole-bar rests be seen.
+
+    Audiveris marks every measure of a multi-measure rest `print-object="no"`,
+    because on the page they are not drawn — the thick bar and its number stand
+    for all of them.  musicxml2ly takes that literally and writes a *spacer*,
+    so the fresh part shows sixteen empty bars where the original shows one bar
+    marked 16.  With the attribute gone it writes `R1*16`, which is the
+    multi-measure rest, drawn and numbered, and which is also what MuseScore
+    and Sibelius expect to find.
+
+    Only whole-bar rests are touched, and nothing that sounds is changed.
+    """
+    changed = 0
+    for note in tree.getroot().iter("note"):
+        rest = note.find("rest")
+        if rest is None or rest.get("measure") != "yes":
+            continue
+        if note.get("print-object") == "no":
+            del note.attrib["print-object"]
+            changed += 1
+    return changed
 
 
 def written_bars(tree: ET.ElementTree, span: tuple[int, int]) -> list[tuple[int, int | None]]:
@@ -842,3 +868,57 @@ def _blank_bar(template: ET.Element, duration: int) -> ET.Element:
     rest.set("measure", "yes")
     ET.SubElement(note, "duration").text = str(duration or 4)
     return measure
+
+
+def strip_stray_lyrics(tree: ET.ElementTree, dense: float = 0.10) -> list[str]:
+    """Throw away words that are printing on the page, not words to sing.
+
+    Audiveris ran the text step over the bottom of a timpani part and attached
+    the publisher's imprint to four notes as lyrics; musicxml2ly then gave the
+    part a Lyrics context, and the fresh page carried "VERLAG AG, 4537
+    Wicdlisbach," across the staff over bar 211, with a stanza mark "1." beside
+    the first bar.
+
+    A song is not distinguished from that by what the words say — it is
+    distinguished by how many notes have one.  Below one note in ten, the words
+    are furniture; a real vocal line has one on nearly every note.  A part with
+    genuine lyrics keeps them, and either way the count is reported.
+    """
+    notes = list(tree.getroot().iter("note"))
+    with_words = [n for n in notes if n.find("lyric") is not None]
+    if not with_words:
+        return []
+    if len(with_words) >= dense * max(1, len(notes)):
+        return [f"{len(with_words)} note(s) carry lyrics; kept"]
+    words = []
+    for note in with_words:
+        for lyric in list(note.findall("lyric")):
+            words.append((lyric.findtext("text") or "").strip())
+            note.remove(lyric)
+    shown = " ".join(w for w in words if w)[:60]
+    return [f"dropped {len(with_words)} stray lyric(s) — {shown!r} — "
+            f"printing on the page, not words to sing"]
+
+
+def dedupe_directions(tree: ET.ElementTree) -> int:
+    """One tempo marking per bar, not the same one twice.
+
+    A part can carry a marking of its own and be given the same one again by
+    the graft from the score's top staff, and "Presto" printed over "Presto" is
+    the visible result.
+    """
+    removed = 0
+    for measure in tree.getroot().iter("measure"):
+        seen: set[str] = set()
+        for direction in list(measure.findall("direction")):
+            text = " ".join(
+                (w.text or "").strip() for w in direction.iter("words")
+            ).strip()
+            if not text:
+                continue
+            if text in seen:
+                measure.remove(direction)
+                removed += 1
+            else:
+                seen.add(text)
+    return removed

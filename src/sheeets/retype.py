@@ -367,6 +367,16 @@ def retype(
     for line in seams:
         say(line)
     repairs = score_xml.sanitize(tree)
+    for line in score_xml.strip_stray_lyrics(tree):
+        say(line)
+        warnings.append(line)
+    doubled = score_xml.dedupe_directions(tree)
+    if doubled:
+        say(f"{doubled} marking(s) printed twice; one copy kept")
+    shown = score_xml.show_bar_rests(tree)
+    if shown:
+        say(f"{shown} whole-bar rest(s) made visible, so multi-bar rests are drawn "
+            f"as one bar with a number rather than as empty bars")
     guesses = score_xml.fill_incomplete(tree)
     repairs.extend(str(g) for g in guesses)
     guessed = sorted({g.measure for g in guesses if g.measure})

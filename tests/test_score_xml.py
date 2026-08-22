@@ -284,3 +284,80 @@ def test_bars_that_cannot_be_recovered_are_still_counted():
     tree = _part_with_rests()
     assert pad_system(tree, (4, 6), 3) == 3
     assert count_measures(tree) == 9
+
+
+def test_words_printed_on_the_page_are_not_words_to_sing():
+    import xml.etree.ElementTree as ET
+
+    from sheeets.score_xml import strip_stray_lyrics
+
+    root = ET.Element("score-partwise")
+    part = ET.SubElement(root, "part")
+    for n in range(40):
+        measure = ET.SubElement(part, "measure")
+        measure.set("number", str(n + 1))
+        note = ET.SubElement(measure, "note")
+        ET.SubElement(note, "duration").text = "4"
+        if n in (10, 11, 12):                    # the publisher's imprint
+            lyric = ET.SubElement(note, "lyric")
+            ET.SubElement(lyric, "text").text = ["VERLAG", "AG,", "4537"][n - 10]
+    tree = ET.ElementTree(root)
+    notes = strip_stray_lyrics(tree)
+    assert notes and "VERLAG" in notes[0]
+    assert not list(tree.getroot().iter("lyric"))
+
+
+def test_a_part_that_really_has_words_keeps_them():
+    import xml.etree.ElementTree as ET
+
+    from sheeets.score_xml import strip_stray_lyrics
+
+    root = ET.Element("score-partwise")
+    part = ET.SubElement(root, "part")
+    for n in range(10):
+        measure = ET.SubElement(part, "measure")
+        note = ET.SubElement(measure, "note")
+        ET.SubElement(note, "duration").text = "4"
+        lyric = ET.SubElement(note, "lyric")
+        ET.SubElement(lyric, "text").text = "la"
+    tree = ET.ElementTree(root)
+    strip_stray_lyrics(tree)
+    assert len(list(tree.getroot().iter("lyric"))) == 10
+
+
+def test_the_same_marking_is_not_printed_twice():
+    import xml.etree.ElementTree as ET
+
+    from sheeets.score_xml import dedupe_directions
+
+    root = ET.Element("score-partwise")
+    part = ET.SubElement(root, "part")
+    measure = ET.SubElement(part, "measure")
+    for text in ("Presto", "Presto", "solo"):
+        direction = ET.SubElement(measure, "direction")
+        kind = ET.SubElement(direction, "direction-type")
+        ET.SubElement(kind, "words").text = text
+    assert dedupe_directions(ET.ElementTree(root)) == 1
+    assert [w.text for w in root.iter("words")] == ["Presto", "solo"]
+
+
+def test_a_bar_rest_inside_a_multi_rest_is_made_visible():
+    """Invisible whole-bar rests come out of musicxml2ly as spacers, so a
+    sixteen-bar rest prints as sixteen empty bars instead of one marked 16."""
+    import xml.etree.ElementTree as ET
+
+    from sheeets.score_xml import show_bar_rests
+
+    root = ET.Element("score-partwise")
+    part = ET.SubElement(root, "part")
+    measure = ET.SubElement(part, "measure")
+    note = ET.SubElement(measure, "note")
+    note.set("print-object", "no")
+    ET.SubElement(note, "rest").set("measure", "yes")
+    sounding = ET.SubElement(measure, "note")
+    sounding.set("print-object", "no")           # a cue or an invisible note
+    ET.SubElement(sounding, "pitch")
+    tree = ET.ElementTree(root)
+    assert show_bar_rests(tree) == 1
+    assert "print-object" not in note.attrib
+    assert sounding.get("print-object") == "no"  # only whole-bar rests
