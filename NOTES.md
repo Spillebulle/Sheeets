@@ -214,8 +214,8 @@ the same music, over all 27 pages:
 | | reading the extracted part | reading the score pages |
 |---|---|---|
 | what the engine sees | lines that are *pieces* of systems, most starting mid-phrase with no clef | complete systems, nineteen staves, every clef in place |
-| measures found | 192 | (see the run) |
-| per page | wildly uneven: 1, 7, 9, 30, 34, 42, 4, 5, 2 … | — |
+| measures found | 192 | **388** |
+| per page | wildly uneven: 1, 7, 9, 30, 34, 42, 4, 5, 2 … | steady: 12-19, matching the scan |
 
 Audiveris reported "19 parts along 1 system" on a raw score page — exactly the
 19 staves the detector finds — and the wanted part is then chosen out of its
@@ -265,11 +265,23 @@ takes ten seconds.
 - OCR labels. `name:` works through `pytesseract` if it is installed; it has
   never been run here, and the labels on a score are 2 mm high and abbreviated,
   so treat it as a convenience and check with `inspect --overlay`.
-- **How good a retype can get.** Audiveris reads this percussion part as a
-  draft, not as a finished part: a third of its measures do not add up, and it
-  invents the odd clef change. Percussion is the hard case — two voices, X
-  noteheads, no pitch to check against — and a pitched part should do better.
-  Nobody has measured that yet: run `retype --part -2` on the Timpani and put
-  the numbers here.
+- **How good a retype can get — measured, both parts, all 27 pages.**
+
+  | | Optional Percussion | Timpani |
+  |---|---|---|
+  | bars counted in the scan | 400 | 409 |
+  | measures read | 388 | 402 |
+  | measures that do not add up | 87 (22 %) | **8 (2 %)** |
+  | pages that failed outright | 1 of 27 | 0 |
+
+  The pitched part is nearly clean; the percussion part is a draft. That is the
+  expected shape — percussion is two voices of unpitched noteheads with nothing
+  to check a pitch against — but it is worth stating plainly rather than
+  averaging the two into a claim about "OMR".
+
+  One page (18) failed in Audiveris and the run carried on without it, which is
+  the designed behaviour: the other 26 pages are not lost because one is hard.
+  Its measures are simply missing from the result, which is exactly what the
+  bar-count cross-check is there to reveal.
 - **Whether feeding the engine a bigger staff helps.** The draft is rendered at
   `--omr-staff-mm 2.2` and `--omr-dpi 400`; neither number has been varied.
