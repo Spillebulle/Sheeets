@@ -337,3 +337,9 @@ repository, and the tests draw their own synthetic pages (`tools/make_fixture.py
 ```console
 python -m pytest          # 65 tests, no score and no OMR engine required
 ```
+
+## Licence
+
+GPL-3.0-or-later; see `LICENSE`. That covers this code and nothing else — the
+music you put through it is yours or somebody else's, and the section above
+says what that means in practice.

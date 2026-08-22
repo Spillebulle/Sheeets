@@ -6,6 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "sheeets"
 description = "Cut a part out of a scanned score and set it as its own sheet music."
 readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dynamic = ["version"]
 dependencies = [
@@ -16,7 +18,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ocr = ["pytesseract>=0.3.10"]
+# Reading the printed instrument labels, the rehearsal letters and the bar
+# numbers needs `tesseract` on PATH and nothing else — it is called directly.
+# pytesseract is used if it happens to be installed and is not required.
 dev = ["pytest>=8.0"]
 
 [project.scripts]
