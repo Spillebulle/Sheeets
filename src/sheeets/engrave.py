@@ -85,7 +85,7 @@ class LilyPondEngraver:
         return Engraved(pdf=out_pdf, lilypond=ly, log=first.stderr + second.stderr)
 
 
-def _systems_for(musicxml: Path, target_notes: int = 32) -> int | None:
+def _systems_for(musicxml: Path, target_events: int = 20) -> int | None:
     """How many systems this part wants, or None to let LilyPond decide.
 
     LilyPond fills a line and then breaks it, which for a part of plain
@@ -98,9 +98,21 @@ def _systems_for(musicxml: Path, target_notes: int = 32) -> int | None:
     distributes them evenly, which is the same thing said from the other end.
 
     So the count is worked out here.  What matters is not bars but *how much is
-    in* a bar: eight bars to a line suits a part at four notes a bar and is far
-    too many at sixteen, so the target is a number of notes per line and the
-    bars follow from it.  Between four and twelve bars a line either way.
+    in* a bar, so the target is a number of written events to a line and the
+    bars follow from it.  Twenty was read off the page: this timpani part
+    averages 2.25 events to a bar and wants nine bars to a line, which is close
+    to what the publisher's own engraving of it does.  A part of running
+    semiquavers lands at four bars a line, which is also right.  Between four
+    and twelve either way.
+
+    This is a count, not a set of break points.  Putting the breaks in
+    explicitly was tried — `<print new-system="yes">` every N bars, which
+    musicxml2ly turns into a break — and it is worse: where a part has two
+    voices, musicxml2ly pads the silent one with one long skip per run of empty
+    bars, those runs do not line up with the other voice's multi-measure rests,
+    and a break inside one leaves an empty staff line behind and prints the
+    rest twice.  LilyPond has to be allowed to choose *where*; all it needs
+    from here is how many.
 
     Multi-measure rests are counted as the one bar they are drawn as.
     """
@@ -127,7 +139,7 @@ def _systems_for(musicxml: Path, target_notes: int = 32) -> int | None:
         if note.find("rest") is None or note.find("rest").get("measure") != "yes"
     )
     per_bar = max(1.0, sounding / drawn)
-    per_line = min(12, max(4, round(target_notes / per_bar)))
+    per_line = min(12, max(4, round(target_events / per_bar)))
     return max(1, -(-drawn // per_line))
 
 
