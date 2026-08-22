@@ -554,9 +554,24 @@ one: below one note in ten they are furniture.
 - Curled pages. Deskew is a single angle per page, and a scan with a curve near
   the binding will not straighten. The detector tolerates it (the line fits are
   per-component) but the crop band will be looser than it needs to be.
-- OCR labels. `name:` works through `pytesseract` if it is installed; it has
-  never been run here, and the labels on a score are 2 mm high and abbreviated,
-  so treat it as a convenience and check with `inspect --overlay`.
+- ~~OCR labels~~ — **run, and it works.** `name:` no longer needs
+  `pytesseract`: tesseract is called directly, as the rehearsal marks and the
+  bar numbers already do, which is why the feature had never once been
+  exercised on this machine. Two things had to change besides. The label
+  window reached twelve staff spaces left of the staff where the column is
+  twenty-odd, so every name arrived with its first letters missing —
+  "impani", "lugel", "shonium". And the match has to be tolerant: read off
+  this score all nineteen names come back right but carrying the staff's own
+  bracket and a stray tick, `". Timpani ["`, `"_y Eb Bass -~"`, `"= Euphonium
+  l"`. Compared on letters alone, with a close match accepted, `name:Timpani`,
+  `name:Percussion` and `name:Euphonium` each pick the right staff.
+
+  The staff is then remembered, which matters twice: many scores print the
+  names on the first page only, and reading nineteen labels on each of 27
+  pages is five hundred OCR calls where nineteen will do.
+
+  Still a convenience, not the thing correctness rests on — `inspect --labels`
+  writes the column out as an image and always works.
 - **How good a retype can get — measured three ways on one piece.**
 
   | | Optional Percussion, from the score | Timpani, from the score | Timpani, the publisher's part |

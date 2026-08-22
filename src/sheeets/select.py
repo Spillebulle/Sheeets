@@ -74,17 +74,31 @@ class AllSelector:
 class LabelSelector:
     """Match the instrument name printed to the left of the staff.
 
-    Needs an OCR backend, which is optional and off the default path — the
-    labels on a score are tiny and abbreviated ("Rep. Cnt.", "B. Tbn."), so this
-    is a convenience, never the thing correctness rests on.  `sheeets inspect
-    --labels` writes out the label column as an image so a person can read it
-    and pass the index instead, which always works.
+    Needs tesseract, which is optional.  It is a convenience and never the
+    thing correctness rests on: `sheeets inspect --labels` writes out the label
+    column as an image so a person can read it and pass the index instead,
+    which always works.
+
+    Two things make it usable rather than merely present.
+
+    **The match is tolerant.** Read off a real score at 300 dpi the names come
+    back as "Ist Horn I", "Eb Bass -~", "Optional* Percussion" — right, with
+    the staff's own bracket and a stray tick swept in.  A plain substring test
+    is asking OCR to be perfect for no reason, so the comparison is on letters
+    alone and accepts a close match.
+
+    **The staff is remembered.** Many scores print their names on the first
+    page only.  Once a name has been found, the staff it was found on is used
+    for every later system with the same number of staves — which is also what
+    makes this affordable, since it turns nineteen OCR calls a page into
+    nineteen for the whole score.
     """
 
     def __init__(self, pattern: str, ocr=None) -> None:
         self.pattern = pattern.lower()
         self._ocr = ocr
-        self._cache: dict[tuple[int, int], str] = {}
+        self._found: int | None = None
+        self._staves = 0
 
     @property
     def name(self) -> str:
@@ -93,10 +107,32 @@ class LabelSelector:
     def select(self, system: System, page: DetectedPage | None = None) -> list[int]:
         from .ocr import read_labels  # imported late: optional dependency
 
+        if self._found is not None and len(system.staves) == self._staves:
+            return [self._found]
         image = page.image if page is not None else None
         labels = read_labels(system, image=image, ocr=self._ocr)
-        hits = [i for i, text in enumerate(labels) if self.pattern in text.lower()]
-        return hits[:1]
+        scored = [(_likeness(self.pattern, text), i) for i, text in enumerate(labels)]
+        best, index = max(scored, default=(0.0, -1))
+        if best < 0.8 or index < 0:
+            return []
+        self._found, self._staves = index, len(system.staves)
+        return [index]
+
+
+def _likeness(pattern: str, label: str) -> float:
+    """How much of `pattern` is in `label`, ignoring anything but letters."""
+    import difflib
+
+    want = "".join(c for c in pattern.lower() if c.isalnum())
+    have = "".join(c for c in label.lower() if c.isalnum())
+    if not want or not have:
+        return 0.0
+    if want in have:
+        return 1.0
+    match = difflib.SequenceMatcher(None, want, have).find_longest_match(
+        0, len(want), 0, len(have)
+    )
+    return match.size / len(want)
 
 
 def parse(spec: str) -> PartSelector:
