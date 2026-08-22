@@ -61,3 +61,29 @@ def test_a_part_page_is_many_systems_of_one_staff_not_one_system():
         )
         counts = [len(s) for s in page.systems]
         assert counts == ([3] if joined else [1, 1, 1]), (joined, counts)
+
+
+def test_a_barline_anywhere_joins_a_system_not_just_at_the_left_edge():
+    """Looking only at the left edge depends on knowing where the staff starts.
+
+    When one staff line is detected a little short, that window misses the
+    barline and a nineteen-stave system splits in two.  Every barline in a
+    system joins its staves, so any of them will do.
+    """
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    from sheeets.detect.projection import ProjectionDetector
+    from sheeets.model import PageImage
+
+    space = 11
+    image = Image.new("L", (1400, 700), 255)
+    draw = ImageDraw.Draw(image)
+    tops = [100, 300]
+    for y in tops:
+        for k in range(5):
+            draw.line([(150, y + k * space), (1300, y + k * space)], fill=0, width=2)
+    # No bracket at the left; the staves are joined by a barline in the middle.
+    draw.line([(700, tops[0]), (700, tops[1] + 4 * space)], fill=0, width=3)
+    page = ProjectionDetector().detect(PageImage(index=0, array=np.asarray(image), dpi=300))
+    assert [len(s) for s in page.systems] == [2]

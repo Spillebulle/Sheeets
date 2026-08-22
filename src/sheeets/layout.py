@@ -23,22 +23,23 @@ from .model import Staff, System
 
 
 def joined(image, upper: Staff, lower: Staff, threshold: int = 160,
-           reach_spaces: float = 3.0, min_columns: int = 1) -> bool:
-    """Is there a barline bridging the gap between these two staves?"""
+           min_columns: int = 1) -> bool:
+    """Is there a barline bridging the gap between these two staves?
+
+    Looked for across the whole width, not just at the left edge.  The left
+    edge alone seemed the obvious place — that is where a system's bracket is —
+    but it depends on knowing exactly where the staff starts, and when a staff
+    line is detected a little short the window misses the barline and a
+    nineteen-stave system splits in two.  Every barline in a system joins its
+    staves, so there is no need to be fussy about which one is found.
+    """
     if image is None:
         return False
     top = int(round(upper.bottom))
     bottom = int(round(lower.top))
     if bottom - top < 3:
         return True
-    space = upper.space or lower.space or 10.0
-    # The joining barline is at the left edge of the system, where the bracket
-    # is; look there and a little to the right of it.
-    x0 = max(0, int(upper.x0 - space))
-    x1 = min(image.shape[1], int(upper.x0 + reach_spaces * space))
-    if x1 - x0 < 2:
-        return False
-    gap = image[top + 1 : bottom, x0:x1] < threshold
+    gap = image[top + 1 : bottom, :] < threshold
     if gap.size == 0:
         return True
     return int((gap.mean(axis=0) > 0.9).sum()) >= min_columns
