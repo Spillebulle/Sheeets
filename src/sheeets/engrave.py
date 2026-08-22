@@ -70,8 +70,11 @@ class LilyPondEngraver:
         if not ly.exists():
             raise RuntimeError(f"musicxml2ly wrote nothing:\n{first.stderr[-2000:]}")
 
-        ly.write_text(_with_layout(ly.read_text(encoding="utf-8"), staff_size, paper, landscape),
-                      encoding="utf-8")
+        ly.write_text(
+            _with_layout(ly.read_text(encoding="utf-8"), staff_size, paper, landscape,
+                         systems=_systems_for(musicxml)),
+            encoding="utf-8",
+        )
 
         second = subprocess.run(
             [self.lilypond, "-dno-point-and-click", "-o", str(out_pdf.with_suffix("")), str(ly)],
@@ -82,7 +85,54 @@ class LilyPondEngraver:
         return Engraved(pdf=out_pdf, lilypond=ly, log=first.stderr + second.stderr)
 
 
-def _with_layout(source: str, staff_size: float, paper: str, landscape: bool) -> str:
+def _systems_for(musicxml: Path, target_notes: int = 32) -> int | None:
+    """How many systems this part wants, or None to let LilyPond decide.
+
+    LilyPond fills a line and then breaks it, which for a part of plain
+    crotchets and whole-bar rests means it will happily put thirty bars on one
+    line while an earlier line has five.  Measured on a timpani part: nine
+    systems of five to eight bars, then one of about thirty with the
+    multi-measure rests squeezed below their own minimum width and the numbers
+    sitting on the staff.  There is no LilyPond setting for "bars per line";
+    there is one for how many systems the whole part gets, and LilyPond then
+    distributes them evenly, which is the same thing said from the other end.
+
+    So the count is worked out here.  What matters is not bars but *how much is
+    in* a bar: eight bars to a line suits a part at four notes a bar and is far
+    too many at sixteen, so the target is a number of notes per line and the
+    bars follow from it.  Between four and twelve bars a line either way.
+
+    Multi-measure rests are counted as the one bar they are drawn as.
+    """
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.parse(musicxml).getroot()
+    except Exception:
+        return None
+    part = root.find("part")
+    if part is None:
+        return None
+    measures = part.findall("measure")
+    hidden = 0
+    for measure in measures:
+        element = measure.find(".//multiple-rest")
+        if element is not None and (element.text or "").strip().isdigit():
+            hidden += max(0, int(element.text.strip()) - 1)
+    drawn = len(measures) - hidden
+    if drawn < 8:
+        return None
+    sounding = sum(
+        1 for note in part.iter("note")
+        if note.find("rest") is None or note.find("rest").get("measure") != "yes"
+    )
+    per_bar = max(1.0, sounding / drawn)
+    per_line = min(12, max(4, round(target_notes / per_bar)))
+    return max(1, -(-drawn // per_line))
+
+
+def _with_layout(source: str, staff_size: float, paper: str, landscape: bool,
+                 systems: int | None = None) -> str:
     """Give the file our page and staff size, and take away the score's.
 
     musicxml2ly writes its own `\paper` block and its own
@@ -109,13 +159,43 @@ def _with_layout(source: str, staff_size: float, paper: str, landscape: bool) ->
         "    indent = 1.2\\cm",
         "    short-indent = 0\\cm",
         "    ragged-last-bottom = ##t",
-        "}",
+        # Let the last page end where the music does rather than spreading the
+        # systems down it; a part is read from a stand, not admired.
+        "    ragged-bottom = ##t",
     ]
+    if systems:
+        block.append(f"    system-count = {systems}")
+    block.append("}")
+    source = _with_rest_shape(source)
     match = re.search(r'^\\version\s+"[^"]+"\s*$', source, flags=re.M)
     if not match:
         return "\n".join(block) + "\n" + source
     at = match.end()
     return source[:at] + "\n" + "\n".join(block) + source[at:]
+
+
+# A multi-measure rest is the most important thing on a part's page and the
+# thing LilyPond gives least room to by default: at this size a rest of eight
+# bars came out barely wider than a crotchet, with its number pressed onto the
+# staff between two barlines a few millimetres apart.  A player reads that
+# number from a stand.
+_REST_SHAPE = """
+        \\override MultiMeasureRest.minimum-length = #16
+        \\override MultiMeasureRest.space-increment = #3
+        \\override MultiMeasureRestNumber.staff-padding = #1.2"""
+
+
+def _with_rest_shape(source: str) -> str:
+    """Give multi-measure rests room, inside whatever Score context exists."""
+    match = re.search(r"\\context\s*\{\s*\\Score", source)
+    if not match:
+        return source.replace(
+            "\\score {",
+            "\\layout {\n    \\context { \\Score" + _REST_SHAPE + "\n        }\n    }\n\n\\score {",
+            1,
+        )
+    at = match.end()
+    return source[:at] + _REST_SHAPE + source[at:]
 
 
 def _drop_lines(source: str, prefix: str) -> str:

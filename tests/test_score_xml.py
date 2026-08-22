@@ -361,3 +361,64 @@ def test_a_bar_rest_inside_a_multi_rest_is_made_visible():
     assert show_bar_rests(tree) == 1
     assert "print-object" not in note.attrib
     assert sounding.get("print-object") == "no"  # only whole-bar rests
+
+
+def _bare(duration, divisions=12, rest=True):
+    import xml.etree.ElementTree as ET
+
+    root = ET.Element("score-partwise")
+    part = ET.SubElement(root, "part")
+    measure = ET.SubElement(part, "measure")
+    attributes = ET.SubElement(measure, "attributes")
+    ET.SubElement(attributes, "divisions").text = str(divisions)
+    note = ET.SubElement(measure, "note")
+    if rest:
+        ET.SubElement(note, "rest")
+    else:
+        ET.SubElement(note, "pitch")
+    ET.SubElement(note, "duration").text = str(duration)
+    ET.SubElement(note, "voice").text = "1"
+    return ET.ElementTree(root), note
+
+
+def test_a_rest_with_a_length_and_no_value_is_named():
+    """musicxml2ly dies part-way through the file on one of these, and the
+    message names LilyPond's own internals rather than the bar."""
+    from sheeets.score_xml import name_durations
+
+    tree, note = _bare(6)                     # 6 of 12 divisions: an eighth
+    assert name_durations(tree)
+    assert note.findtext("type") == "eighth" and note.find("dot") is None
+    assert note.findtext("duration") == "6"
+
+
+def test_a_dotted_length_gets_its_dot():
+    from sheeets.score_xml import name_durations
+
+    tree, note = _bare(18)                    # a dotted quarter
+    name_durations(tree)
+    assert note.findtext("type") == "quarter"
+    assert len(note.findall("dot")) == 1
+
+
+def test_a_length_no_note_can_be_is_cut_and_said_so():
+    from sheeets.score_xml import name_durations
+
+    tree, note = _bare(20)                    # five sixths of a bar
+    notes = name_durations(tree)
+    assert note.findtext("type") == "quarter" and len(note.findall("dot")) == 1
+    assert note.findtext("duration") == "18"
+    assert any("cut to the longest" in n for n in notes)
+
+
+def test_a_quote_in_a_marking_does_not_end_the_lilypond_string():
+    import xml.etree.ElementTree as ET
+
+    from sheeets.score_xml import tame_text
+
+    root = ET.Element("score-partwise")
+    words = ET.SubElement(ET.SubElement(root, "direction"), "words")
+    words.text = 'A"egro m0 to al \\ways'
+    notes = tame_text(ET.ElementTree(root))
+    assert words.text == "A'egro m0 to al ways"
+    assert notes

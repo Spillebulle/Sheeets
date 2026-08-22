@@ -922,3 +922,123 @@ def dedupe_directions(tree: ET.ElementTree) -> int:
             else:
                 seen.add(text)
     return removed
+
+
+# Note values LilyPond can write, longest first, as multiples of a quarter.
+_VALUES = [
+    ("breve", 8.0), ("whole", 4.0), ("half", 2.0), ("quarter", 1.0),
+    ("eighth", 0.5), ("16th", 0.25), ("32nd", 0.125), ("64th", 0.0625),
+]
+
+
+def name_durations(tree: ET.ElementTree) -> list[str]:
+    """Give every note a written value, and shorten the ones that have none.
+
+    A rest can reach the MusicXML with a duration and no `<type>`: Audiveris
+    knows how long the gap is without deciding what rest to draw in it.
+    musicxml2ly then has nothing to print and dies part-way through the file
+    with `'NoneType' object has no attribute 'print_ly'` — LilyPond's own error
+    path, so the message says nothing about the note that caused it, and the
+    .ly it leaves behind is truncated in the middle of a bar.  Two of the ten
+    fleet cases failed exactly this way.
+
+    Most of them are simply unnamed: 6 against 12 divisions is an eighth, 18 is
+    a dotted quarter.  A few are lengths no single rest can be — 20 against 12
+    is five sixths of a bar — and those are cut to the longest value that fits
+    and reported.  `fill_incomplete` then pads the bar out, so the bar still
+    adds up and the change is visible in two places rather than none.
+    """
+    notes: list[str] = []
+    part = tree.getroot().find("part")
+    if part is None:
+        return notes
+    divisions = 0
+    shortened = 0
+    named = 0
+    for measure in part.findall("measure"):
+        for attributes in measure.findall("attributes"):
+            text = attributes.findtext("divisions")
+            if text and text.strip().isdigit() and int(text.strip()):
+                divisions = int(text.strip())
+        if not divisions:
+            continue
+        for note in measure.findall("note"):
+            if note.find("type") is not None or note.find("grace") is not None:
+                continue
+            rest = note.find("rest")
+            if rest is not None and rest.get("measure") == "yes":
+                continue                      # a whole-bar rest needs no value
+            text = note.findtext("duration")
+            if not text or not text.strip().lstrip("-").isdigit():
+                continue
+            quarters = int(text.strip()) / divisions
+            name, dots, value = _nearest_value(quarters)
+            if name is None:
+                continue
+            if abs(value - quarters) > 1e-6:
+                note.find("duration").text = str(int(round(value * divisions)))
+                shortened += 1
+            _write_type(note, name, dots)
+            named += 1
+    if named:
+        notes.append(f"{named} note(s) or rest(s) had a length but no written value; "
+                     f"named from the length")
+    if shortened:
+        notes.append(f"{shortened} of them were a length no single note can be, and "
+                     f"were cut to the longest that fits — the bar is padded and flagged")
+    return notes
+
+
+def _nearest_value(quarters: float) -> tuple[str | None, int, float]:
+    """The longest (name, dots) worth no more than `quarters`."""
+    if quarters <= 0:
+        return None, 0, 0.0
+    best: tuple[str | None, int, float] = (None, 0, 0.0)
+    for name, base in _VALUES:
+        for dots in (0, 1, 2):
+            value = base * (2 - 0.5 ** dots)
+            if value <= quarters + 1e-6 and value > best[2]:
+                best = (name, dots, value)
+    return best
+
+
+def _write_type(note: ET.Element, name: str, dots: int) -> None:
+    """Put `<type>` and its dots where MusicXML says they belong."""
+    after = {"duration", "tie", "instrument", "voice", "rest", "pitch",
+             "unpitched", "chord", "grace", "cue"}
+    at = 0
+    for index, child in enumerate(note):
+        if child.tag in after:
+            at = index + 1
+    element = ET.Element("type")
+    element.text = name
+    note.insert(at, element)
+    for step in range(dots):
+        note.insert(at + 1 + step, ET.Element("dot"))
+
+
+def tame_text(tree: ET.ElementTree) -> list[str]:
+    """Take out the characters that break the engraver.
+
+    Everything readable on the page arrives here through OCR, and OCR of a
+    smudged tempo marking produces things no engraver expects.  One word on a
+    crooked photocopy came back as `A"egro m0 to al ways`, and musicxml2ly
+    writes text straight into a LilyPond string: the stray double quote closed
+    it, and LilyPond died with "EOF found inside string" three hundred lines
+    later, at the end of the file, saying nothing about the bar it came from.
+
+    A double quote becomes a single one and a backslash is dropped, everywhere
+    in the document.  Neither can be meant: a backslash is not a character in
+    music, and a title with a quotation mark in it reads the same with an
+    apostrophe.
+    """
+    changed = 0
+    for element in tree.getroot().iter():
+        for attribute in ("text", "tail"):
+            value = getattr(element, attribute)
+            if not value or ('"' not in value and "\\" not in value):
+                continue
+            setattr(element, attribute, value.replace('"', "'").replace("\\", ""))
+            changed += 1
+    return ([f"{changed} piece(s) of text held a quote or a backslash, which "
+             f"LilyPond reads as syntax; taken out"] if changed else [])
