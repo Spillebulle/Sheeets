@@ -67,18 +67,40 @@ def test_the_sequence_repairs_a_misread_letter():
     from sheeets.marks import tidy_sequence
 
     # C read as G and O read as zero — both happened on the real score.
-    got, notes = tidy_sequence(["A", "B", "G", "D", "E", "F", "G", "H"])
+    got, notes, kept = tidy_sequence(["A", "B", "G", "D", "E", "F", "G", "H"])
     assert got == list("ABCDEFGH")
-    assert len(notes) == 1 and "wants 'C'" in notes[0]
+    assert len(kept) == 8
+    assert any("wants 'C'" in note for note in notes)
 
-    got, notes = tidy_sequence(["L", "M", "N", "0"])
-    assert got == list("LMNO")
+
+def test_strays_anywhere_in_the_run_are_dropped():
+    """Exactly what the box detector returned on the real score, junk and all."""
+    from sheeets.marks import tidy_sequence
+
+    reads = ["B", "L", "H", "A", "B", "C", "D", "E", "F", "K",
+             "G", "H", "I", "J", "K", "L", "I", "M", "N", "O"]
+    got, notes, kept = tidy_sequence(reads)
+    assert "".join(got) == "ABCDEFGHIJKLMNO"
+    assert len(kept) == 15
+    assert sum(1 for n in notes if "dropped" in n) == 5
+
+
+def test_a_chain_that_starts_late_is_extended_backwards():
+    """"A B" scores two against a clean "D..N" of eleven, so the exact chain
+    starts late and the first marks have to be reached back into."""
+    from sheeets.marks import tidy_sequence
+
+    reads = ["Y", "A", "B", "G", "D", "E", "F", "G", "H",
+             "I", "J", "K", "L", "M", "N", "0"]
+    got, notes, kept = tidy_sequence(reads)
+    assert "".join(got) == "ABCDEFGHIJKLMNO"
+    assert len(kept) == 15  # the stray "Y" is gone
 
 
 def test_a_sequence_that_is_not_a_run_is_left_alone():
     from sheeets.marks import tidy_sequence
 
-    # Marks numbered rather than lettered, or a score that skips: no evidence.
-    for reads in (["1", "2", "3", "4"], ["A", "C", "F", "K"], ["A", "B"]):
-        got, notes = tidy_sequence(reads)
+    # Marks numbered rather than lettered, or too few to judge.
+    for reads in (["1", "2", "3", "4"], ["A", "B"]):
+        got, notes, kept = tidy_sequence(reads)
         assert got == reads and notes == []

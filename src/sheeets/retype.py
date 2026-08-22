@@ -421,12 +421,12 @@ def _find_marks(extraction: Extraction, say) -> dict[int, list[tuple[int, str]]]
             places.append((page.page.index, marks_mod.measure_of(mark, bars)))
             letters.append(mark.text)
 
-    tidied, corrections = marks_mod.tidy_sequence(letters)
+    tidied, corrections, kept = marks_mod.tidy_sequence(letters)
     for line in corrections:
         say(f"rehearsal mark: {line}")
-    # A dropped stray comes off the front, so line the places up with what is
-    # left rather than with what was read.
-    places = places[len(letters) - len(tidied):]
+    # Strays can be dropped from anywhere in the run, so line the places up
+    # with the items that survived rather than with what was read.
+    places = [places[i] for i in kept] if len(kept) == len(tidied) else places
     letters = tidied
 
     out: dict[int, list[tuple[int, str]]] = {}

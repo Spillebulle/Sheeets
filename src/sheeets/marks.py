@@ -51,7 +51,7 @@ def find_boxes(
     threshold: int = 160,
     min_side: float = 1.2,
     max_side: float = 7.0,
-    border_ink: float = 0.45,
+    border_ink: float = 0.30,
     inner_ink: float = 0.5,
 ) -> list[tuple[int, int, int, int]]:
     """Hollow rectangles in the band above a staff.  Returns (x, y, w, h)."""
@@ -116,59 +116,104 @@ def find_marks(image: np.ndarray, top_row: int, space: float, **kwargs) -> list[
     return marks
 
 
-def tidy_sequence(texts: list[str]) -> tuple[list[str], list[str]]:
-    """Repair misreads, and drop strays, using the one thing marks guarantee.
+def tidy_sequence(texts: list[str]) -> tuple[list[str], list[str], list[int]]:
+    """Keep the longest alphabetical chain and throw the rest away.
 
-    Rehearsal letters run in order.  That is a stronger fact than any single
-    OCR result at this size, where the classic confusions all bite: C read as
-    G, O read as zero, I as one, S as five.  Both of the first two happened on
-    this score, and a stray box on the title page read as "Y" and sat in front
-    of the run.
+    Rehearsal letters run A, B, C … in page order.  That is a far stronger fact
+    than any single OCR result at this size, where the classic confusions all
+    bite — C read as G, O as zero, I as one, S as five — and where the box
+    detector, made generous enough to catch a rehearsal box whose printed frame
+    has broken, also picks up the odd rectangle that is not one.
 
-    So the longest ascending run wins: every position it covers is corrected to
-    the letter that position demands, and anything before it that does not fit
-    is dropped as a shape that was never a rehearsal mark.  If no run can be
-    found — a score numbering its marks 1, 2, 3, or one that genuinely skips
-    letters — nothing is touched, because then the sequence is not evidence.
+    Both problems fall to the same treatment.  Find the longest run of items
+    whose letters ascend by one in page order; that run is the real sequence.
+    Anything outside it was never a rehearsal mark.  A gap inside it — B then
+    D — is a letter misread, and if an unused item sits between them it is
+    corrected to the letter its position demands.
 
-    Returns the letters (strays removed) and a note of every change.
+    Returns the letters, a note of every change, and which of the original
+    items were kept.
     """
     if len(texts) < 3:
-        return list(texts), []
+        return list(texts), [], list(range(len(texts)))
 
-    best = None  # (matches, start index)
-    for start in range(len(texts)):
-        letter = texts[start]
-        if len(letter) != 1 or not letter.isalpha():
+    single = [t if len(t) == 1 and t.isalpha() else "" for t in texts]
+    best_length = [0] * len(texts)
+    previous = [-1] * len(texts)
+    for i, letter in enumerate(single):
+        if not letter:
             continue
-        last = chr(ord(letter) + len(texts) - start - 1)
-        if last > "Z":
-            continue
-        matches = sum(
-            1 for i in range(start, len(texts))
-            if texts[i] == chr(ord(letter) + i - start)
-        )
-        if best is None or matches > best[0]:
-            best = (matches, start)
+        best_length[i] = 1
+        for j in range(i):
+            if single[j] and ord(letter) - ord(single[j]) == 1 and best_length[j] + 1 > best_length[i]:
+                best_length[i] = best_length[j] + 1
+                previous[i] = j
+    if not any(best_length):
+        return list(texts), [], list(range(len(texts)))
 
-    if best is None:
-        return list(texts), []
-    matches, start = best
-    covered = len(texts) - start
-    if matches < max(3, 0.6 * covered):
-        return list(texts), []
+    end = max(range(len(texts)), key=lambda i: best_length[i])
+    chain: list[int] = []
+    while end != -1:
+        chain.append(end)
+        end = previous[end]
+    chain.reverse()
+    if len(chain) < 3:
+        return list(texts), [], list(range(len(texts)))
 
-    anchor = ord(texts[start])
-    kept: list[str] = []
     notes: list[str] = []
-    for index in range(start):
-        notes.append(f"dropped {texts[index]!r}: it is not part of the run")
-    for index in range(start, len(texts)):
-        want = chr(anchor + index - start)
-        if texts[index] != want:
-            notes.append(f"read {texts[index]!r} where the sequence wants {want!r}; corrected")
-        kept.append(want)
-    return kept, notes
+    kept: list[int] = []
+    letters: list[str] = []
+    for n, index in enumerate(chain):
+        if n:
+            expected = chr(ord(single[chain[n - 1]]) + 1)
+            # A letter missing from the chain: look for an item between the two
+            # positions that can be corrected into it.
+            while expected != single[index]:
+                spare = next(
+                    (k for k in range(chain[n - 1] + 1, index)
+                     if k not in kept and texts[k]),
+                    None,
+                )
+                if spare is None:
+                    break
+                notes.append(
+                    f"read {texts[spare]!r} where the sequence wants {expected!r}; corrected"
+                )
+                kept.append(spare)
+                letters.append(expected)
+                expected = chr(ord(expected) + 1)
+        kept.append(index)
+        letters.append(single[index])
+
+    # The chain found by exact matches can start late: if the second mark was
+    # misread, "A B" scores 2 against a clean "D..N" of eleven.  Reach outwards
+    # from the chain into the items either side, which must be the letters
+    # before and after it.
+    first_letter = letters[0]
+    expected = chr(ord(first_letter) - 1)
+    for index in range(min(kept) - 1, -1, -1):
+        if index in kept or not texts[index] or expected < "A":
+            continue
+        if texts[index] != expected:
+            notes.append(f"read {texts[index]!r} where the sequence wants {expected!r}; corrected")
+        kept.insert(0, index)
+        letters.insert(0, expected)
+        expected = chr(ord(expected) - 1)
+
+    expected = chr(ord(letters[-1]) + 1)
+    for index in range(max(kept) + 1, len(texts)):
+        if index in kept or not texts[index] or expected > "Z":
+            continue
+        if texts[index] != expected:
+            notes.append(f"read {texts[index]!r} where the sequence wants {expected!r}; corrected")
+        kept.append(index)
+        letters.append(expected)
+        expected = chr(ord(expected) + 1)
+
+    dropped = [texts[i] for i in range(len(texts)) if i not in kept]
+    for text in dropped:
+        notes.append(f"dropped {text!r}: not part of the run")
+    return letters, notes, sorted(kept)
 
 
 def measure_of(mark: Mark, barlines: list[int]) -> int:
