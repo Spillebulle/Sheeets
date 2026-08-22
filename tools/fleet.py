@@ -38,7 +38,7 @@ import json
 import time
 from pathlib import Path
 
-from sheeets import analyse, extract_part
+from sheeets import extract_part
 from sheeets.paper import PageSetup
 
 
@@ -54,21 +54,20 @@ def run_case(case: dict, workdir: Path, out: Path, do_retype: bool) -> dict:
         return result
 
     started = time.time()
-    _, detected, dpi = analyse(source, pages=pages)
-    staff_counts = [sum(len(s) for s in page.systems) for page in detected]
-    result.update(
-        pages=len(detected),
-        dpi=dpi,
-        staves_per_page=_summary(staff_counts),
-        systems_per_page=_summary([len(page.systems) for page in detected]),
-        skew_deg=round(max((abs(p.skew_deg) for p in detected), default=0.0), 2),
-        space_px=round(sum(p.space for p in detected) / max(len(detected), 1), 1),
-    )
-
+    # One detection, not two: the extraction carries the detected pages with
+    # it, so the page statistics come out of the same pass.  Detecting twice
+    # doubled the slowest case in the fleet for nothing.
     extraction = extract_part(source, part=part, pages=pages,
                               out=out / f"{name}-extract.pdf",
                               setup=PageSetup(), part_name=case.get("label", name))
+    detected = extraction.detected
     result.update(
+        pages=len(detected),
+        staves_per_page=_summary([sum(len(s) for s in page.systems) for page in detected]),
+        systems_per_page=_summary([len(page.systems) for page in detected]),
+        skew_deg=round(max((abs(p.skew_deg) for p in detected), default=0.0), 2),
+        space_px=round(sum(p.space for p in detected) / max(len(detected), 1), 1),
+        ink=_summary_text([p.notes.get("ink", "") for p in detected]),
         pieces=len(extraction.segments),
         extract_warnings=len(extraction.warnings),
         extract_seconds=round(time.time() - started, 1),
@@ -101,6 +100,11 @@ def run_case(case: dict, workdir: Path, out: Path, do_retype: bool) -> dict:
     return result
 
 
+def _summary_text(values: list[str]) -> str:
+    seen = [v for v in dict.fromkeys(values) if v]
+    return ",".join(seen) if seen else "-"
+
+
 def _summary(values: list[int]) -> str:
     if not values:
         return "-"
@@ -112,7 +116,8 @@ def render(results: list[dict], previous: dict[str, dict]) -> None:
     columns = [
         ("case", "name", 24), ("pages", "pages", 6), ("staves", "staves_per_page", 7),
         ("sys", "systems_per_page", 4), ("skew", "skew_deg", 5), ("space", "space_px", 6),
-        ("pieces", "pieces", 7), ("meas", "measures", 6), ("bars", "bars_in_scan", 6),
+        ("ink", "ink", 12), ("pieces", "pieces", 7),
+        ("meas", "measures", 6), ("bars", "bars_in_scan", 6),
         ("suspect", "suspect", 8), ("guessed", "guessed", 8),
     ]
     print("  ".join(title.ljust(width) for title, _, width in columns))

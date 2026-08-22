@@ -427,10 +427,9 @@ class ProjectionDetector:
                                 notes={"reason": "could not estimate staff spacing"})
         merged = merge_fragments(cands, x_ref, tolerance=0.45 * space)
         groups = comb_staves([y for y, _ in merged], space)
-        x0 = int(np.median([c.x0 for c in cands]))
-        x1 = int(np.median([c.x1 for c in cands]))
         staves = [
-            Staff(lines=g, space=float(np.median(np.diff(g))), x0=x0, x1=x1)
+            Staff(lines=g, space=float(np.median(np.diff(g))),
+                  **_extent(g, cands, x_ref, space, image.shape[1]))
             for g in groups
         ]
         systems = group_systems(staves, space, page.index,
@@ -443,6 +442,27 @@ class ProjectionDetector:
             skew_deg=skew,
             notes={"line_candidates": len(cands), "merged_lines": len(merged)},
         )
+
+
+def _extent(lines: list[float], cands: list[LineCandidate], x_ref: float,
+            space: float, width: int) -> dict:
+    """Where this staff's own lines begin and end.
+
+    Every staff used to be given the page's median extent, which is wrong for
+    the one place it matters most: the *first* system of a score is indented to
+    make room for the instrument names.  Judged against the page median, the
+    barline joining its staves is outside the window that looks for it, so the
+    first system of a three-player page came back as three separate systems
+    while every later page was read correctly.
+    """
+    mine = [
+        c for c in cands
+        if min(abs(c.y_at(x_ref) - line) for line in lines) <= 0.4 * space
+    ]
+    if not mine:
+        return {"x0": 0, "x1": width}
+    return {"x0": int(np.median([c.x0 for c in mine])),
+            "x1": int(np.median([c.x1 for c in mine]))}
 
 
 def _looks_complete(result: DetectedPage, original: np.ndarray,
