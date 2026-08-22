@@ -101,9 +101,12 @@ def group_systems(
             pass  # a part: every staff stands alone
         elif not _groups_are_even(breaks):
             # The ink says split, but into groups of different sizes — which
-            # systems on one page never are.  A broken barline inside a system,
-            # not a boundary.
-            breaks = [gap > threshold for gap in gaps]
+            # systems on one page never are.  Try to regularise it first: one
+            # page of the three-player set came back [3, 1, 1, 1, 3, 3, 3]
+            # because one system's inner barlines were too faint to find, and
+            # those three singletons plainly make up the missing three.
+            repaired = _regularise(breaks)
+            breaks = repaired if repaired is not None else [g > threshold for g in gaps]
 
     systems: list[System] = []
     current: list[Staff] = [staves[0]]
@@ -119,6 +122,61 @@ def group_systems(
         for i, staff in enumerate(system.staves):
             staff.index = i
     return systems
+
+
+def _sizes(breaks: list[bool]) -> list[int]:
+    sizes: list[int] = []
+    run = 1
+    for starts_new in breaks:
+        if starts_new:
+            sizes.append(run)
+            run = 1
+        else:
+            run += 1
+    sizes.append(run)
+    return sizes
+
+
+def _regularise(breaks: list[bool]) -> list[bool] | None:
+    """Make uneven groups even, if the sizes say plainly how.
+
+    Systems on a page hold the same number of staves, so the commonest group
+    size is what a system is.  A run of smaller groups adding up to exactly
+    that is one system whose inner barlines were missed, and merging them is
+    safe.  Anything that does not come out even is left alone — a page that
+    cannot be regularised is not one to guess at.
+    """
+    sizes = _sizes(breaks)
+    if len(sizes) < 3:
+        return None
+    from collections import Counter
+
+    modal, times = Counter(sizes).most_common(1)[0]
+    if times < 2 or modal < 1:
+        return None
+
+    merged: list[int] = []
+    run = 0
+    for size in sizes:
+        if size > modal:
+            return None
+        run += size
+        if run == modal:
+            merged.append(run)
+            run = 0
+        elif run > modal:
+            return None
+    if run:
+        return None
+    if len(set(merged)) != 1:
+        return None
+
+    out: list[bool] = []
+    for n, size in enumerate(merged):
+        out.extend([False] * (size - 1))
+        if n + 1 < len(merged):
+            out.append(True)
+    return out if len(out) == len(breaks) else None
 
 
 def _groups_are_even(breaks: list[bool]) -> bool:

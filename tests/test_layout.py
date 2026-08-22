@@ -124,3 +124,28 @@ def test_even_groups_are_believed():
     assert _groups_are_even([False, True, False, True, False])   # 2,2,2
     assert _groups_are_even([True, True, True])                  # 1,1,1,1
     assert not _groups_are_even([False, False, True, False])     # 3,2
+
+
+def test_uneven_groups_are_regularised_when_the_sizes_say_how():
+    """One page of the three-player set came back [3, 1, 1, 1, 3, 3, 3].
+
+    Its second system's inner barlines were too faint to find. The three
+    singletons plainly make up the missing three, and merging them is safe.
+    """
+    from sheeets.layout import _regularise, _sizes
+
+    breaks = [False, False, True, True, True, True, False, False, True,
+              False, False, True, False, False]
+    assert _sizes(breaks) == [3, 1, 1, 1, 3, 3, 3]
+    repaired = _regularise(breaks)
+    assert repaired is not None
+    assert _sizes(repaired) == [3, 3, 3, 3, 3]
+
+
+def test_groups_that_cannot_be_made_even_are_left_alone():
+    from sheeets.layout import _regularise
+
+    # 14 and 5: no merging makes these equal, and guessing would be worse.
+    assert _regularise([False] * 13 + [True] + [False] * 4) is None
+    # A group larger than the modal size is not something to take apart.
+    assert _regularise([False, True, False, False, False, True, False]) is None
