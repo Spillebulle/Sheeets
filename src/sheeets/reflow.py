@@ -204,6 +204,7 @@ def segments_for_band(
         else barlines(band_image, top_row, bottom_row)
     label_width = band.music_x0 - band.x0
     pieces = cut_points(band_image.shape[1], max_source_width, cols, start=0)
+    pieces = _clear_of_markings(pieces, band_image, top_row, bottom_row, band.space)
     out: list[Segment] = []
     for i, (a, b) in enumerate(pieces):
         # Only the first piece can carry the instrument label; a continuation
@@ -222,3 +223,52 @@ def segments_for_band(
             Segment(image=piece, band=band, chunk=i, of=len(pieces), dpi=dpi)
         )
     return out
+
+
+def _clear_of_markings(
+    pieces: list[tuple[int, int]], band_image: np.ndarray,
+    top_row: int, bottom_row: int, space: float,
+    threshold: int = 160, reach_spaces: float = 4.0,
+) -> list[tuple[int, int]]:
+    """Move a cut off anything printed above or below the staff.
+
+    A cut lands on a barline, which is right for the music and wrong for
+    everything written *over* the barline: a rehearsal box sits centred on it,
+    so a part cut there gets half a box at the end of one line and half at the
+    start of the next.  The same goes for a tempo word or a hairpin that begins
+    at a bar.
+
+    The staff itself has to be ignored — the barline crosses it, that is what
+    makes it a barline — so only the rows outside the staff are looked at, and
+    the cut walks left until they are clear.  A few staff spaces at most: past
+    that the marking is not straddling the cut, it is simply a busy page, and
+    moving further would start slicing the bar instead.
+    """
+    if not pieces or space <= 0:
+        return pieces
+    top = max(0, int(top_row - reach_spaces * space))
+    bottom = min(band_image.shape[0], int(bottom_row + reach_spaces * space) + 1)
+    above = band_image[top : max(top + 1, int(top_row) - 1)] < threshold
+    below = band_image[min(bottom - 1, int(bottom_row) + 2) : bottom] < threshold
+    if not above.size and not below.size:
+        return pieces
+    inked = np.zeros(band_image.shape[1], dtype=bool)
+    if above.size:
+        inked[: above.shape[1]] |= above.any(axis=0)
+    if below.size:
+        inked[: below.shape[1]] |= below.any(axis=0)
+
+    limit = max(1, int(round(3.5 * space)))
+    moved: list[tuple[int, int]] = []
+    previous = pieces[0][0]
+    for index, (start, end) in enumerate(pieces):
+        finish = end
+        if index < len(pieces) - 1 and 0 <= end < inked.size and inked[end]:
+            step = 0
+            while step < limit and end - step - 1 > previous and inked[end - step - 1]:
+                step += 1
+            if step < limit:
+                finish = end - step
+        moved.append((previous, finish))
+        previous = finish
+    return [(a, b) for a, b in moved if b > a]

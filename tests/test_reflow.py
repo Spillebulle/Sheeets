@@ -153,3 +153,26 @@ def test_a_one_staff_system_still_has_barlines():
     assert len(system.staves) == 1
     found = system_barlines(page, system)
     assert len(found) == 4, found
+
+
+def test_a_cut_does_not_slice_what_is_written_over_the_barline():
+    """A rehearsal box sits centred on a barline, so cutting the system there
+    puts half of it at the end of one line and half at the start of the next."""
+    import numpy as np
+
+    from sheeets.reflow import _clear_of_markings
+
+    space = 16.0
+    top, bottom = 100, 100 + int(4 * space)
+    image = np.full((bottom + 120, 1000), 255, dtype=np.uint8)
+    # A box above the staff, straddling the barline at x = 500.
+    image[int(top - 3 * space) : int(top - 0.5 * space), 480:520] = 0
+
+    moved = _clear_of_markings([(0, 500), (500, 1000)], image, top, bottom, space)
+    assert moved[0][1] <= 480, moved           # the whole box goes to the next piece
+    assert moved[1][0] == moved[0][1]
+
+    # Nothing above the barline: the cut stays where the music put it.
+    clean = np.full((bottom + 120, 1000), 255, dtype=np.uint8)
+    assert _clear_of_markings([(0, 500), (500, 1000)], clean, top, bottom, space) == \
+        [(0, 500), (500, 1000)]
