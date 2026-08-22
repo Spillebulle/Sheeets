@@ -549,8 +549,13 @@ one: below one note in ten they are furniture.
 
 ## Still open
 
-- Multi-system pages. `layout.group_systems` is written and unit tested against
-  fabricated geometry; no real page with two systems has been through it.
+- ~~Multi-system pages~~ — **eight of the ten fleet cases are one.** A
+  publisher's part is nine to thirteen systems to a page, the three-player
+  page is four or five, the book of parts five to eleven. What the grouping
+  needed in the end was not more unit tests but three signals instead of one:
+  a barline joining two staves, equal group sizes, and the gap between them —
+  each of which alone gets one of these cases wrong. See "What real paper does
+  that drawn pages do not".
 - Curled pages. Deskew is a single angle per page, and a scan with a curve near
   the binding will not straighten. The detector tolerates it (the line fits are
   per-component) but the crop band will be looser than it needs to be.
@@ -577,7 +582,7 @@ one: below one note in ten they are furniture.
   | | Optional Percussion, from the score | Timpani, from the score | Timpani, the publisher's part |
   |---|---|---|---|
   | source | bottom staff of 27 bound pages | second from the bottom, same pages | 2 clean engraved pages |
-  | bars the source says it has | 414, by counting barlines | 414, the same count | **403**, from the printed bar numbers |
+  | bars the source says it has | **403**, from the printed bar numbers | 403, the same | **403**, from its own printed numbers |
   | measures read | 402 | 402 | 402 |
   | that do not add up | 41 (10 %) | 8 (2 %) | 6 (1.5 %) |
   | rehearsal marks recovered | A–O, all fifteen | A–O | none readable |
@@ -595,8 +600,10 @@ one: below one note in ten they are furniture.
   out at five times the error rate. Worth stating plainly rather than averaging
   the three into a claim about "OMR".
 
-  Counting barlines made 414 of a 401-bar piece; the printed numbers made 403.
-  Where a part carries numbers, they are the count to believe.
+  Counting barlines made 414 of a 401-bar piece; the printed numbers made 403
+  — and 403 from the score's own numbering and 403 from the publisher's part,
+  two printings that share nothing but the music. Where a page carries bar
+  numbers, they are the count to believe.
 
   An earlier version of this table had a Timpani column taken from a file
   produced from the *score* and renamed, and then a Percussion column that was
@@ -607,9 +614,11 @@ one: below one note in ten they are furniture.
 
 - **Whether feeding the engine a bigger staff helps.** The draft is rendered at
   `--omr-staff-mm 2.2` and `--omr-dpi 400`; neither number has been varied.
-- **Retyping anything but the two parts from the bound score.** Detection is
-  now good on all ten fleet cases; recognition has only been measured on two.
-  The fleet runs `--retype` on everything, and nobody has done it yet.
+- ~~Retyping anything but the two parts from the bound score~~ — **run over
+  all ten.** What it found is in FLEET.md; the short version is that the two
+  faults were both crashes in musicxml2ly rather than anything in the
+  recognition, and that the spread between cases is much wider than any single
+  figure suggests.
 - **The last page of the book of parts.** Its header reads "cm RULE BRITANNIA”
   — nearmmans", with no legible player, so it is called "part 20". It may be a
   second percussion page rather than a part of its own.
