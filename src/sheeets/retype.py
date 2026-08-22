@@ -39,7 +39,7 @@ from .model import Extraction
 from .paper import PageSetup
 from .pipeline import extract_part, write as write_extraction
 from .recognize import Recognizer, get_recognizer
-from .reflow import barlines
+from .reflow import system_barlines
 from .score_xml import MeasureCheck
 
 Progress = Callable[[str], None]
@@ -145,6 +145,11 @@ def count_bars_by_page(extraction: Extraction) -> dict[int, int]:
     barlines anyway in order to cut the systems at them, so the number of bars
     in the source is known before any recognition happens.  A multi-bar rest
     counts as one written bar here, which is also how MusicXML counts it.
+
+    It is an estimate, not a census.  Counted across the system it agreed with
+    Audiveris exactly on three of the first four pages and was four over on the
+    other; counted on one staff alone it was useless — a cornet part playing
+    semiquavers offered 46 "barlines" in a 13-bar system.
     """
     pages = {page.page.index: page for page in extraction.detected}
     seen: set[tuple[int, int]] = set()
@@ -159,9 +164,7 @@ def count_bars_by_page(extraction: Extraction) -> dict[int, int]:
         if page is None:
             continue
         system = page.systems[band.system_index]
-        image = crop.cut(page, band)
-        top, bottom = crop.staff_rows(page, system, band)
-        found = barlines(image, top, bottom)
+        found = system_barlines(page, system)
         total[band.page_index + 1] = total.get(band.page_index + 1, 0) + max(0, len(found) - 1)
     return total
 

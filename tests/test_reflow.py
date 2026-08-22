@@ -75,3 +75,32 @@ def test_page_setup_knows_how_much_source_fits():
     # 182 mm of paper at 1.88x is about 97 mm of source, which is 1143 px.
     assert 1050 < limit < 1250
     assert PageSetup(landscape=True).usable_width_mm > PageSetup().usable_width_mm
+
+
+def test_a_barline_is_what_crosses_the_system_not_one_staff():
+    """A stem crosses its own staff; a barline crosses the others too."""
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    from sheeets.detect.projection import ProjectionDetector
+    from sheeets.model import PageImage
+    from sheeets.reflow import system_barlines
+
+    space = 11
+    image = Image.new("L", (1600, 620), 255)
+    draw = ImageDraw.Draw(image)
+    tops = [80, 260, 440]
+    for y in tops:
+        for k in range(5):
+            draw.line([(150, y + k * space), (1500, y + k * space)], fill=0, width=2)
+        for x in (150, 600, 1050, 1500):          # real barlines, on every staff
+            draw.line([(x, y), (x, y + 4 * space)], fill=0, width=3)
+    # A long stem crossing only the middle staff, where no barline is.
+    draw.line([(820, tops[1]), (820, tops[1] + 4 * space)], fill=0, width=3)
+
+    page = ProjectionDetector().detect(PageImage(index=0, array=np.asarray(image), dpi=300))
+    system = page.systems[0]
+    assert len(system.staves) == 3
+    found = system_barlines(page, system)
+    assert len(found) == 4, found
+    assert all(min(abs(f - x) for x in (150, 600, 1050, 1500)) <= 4 for f in found)

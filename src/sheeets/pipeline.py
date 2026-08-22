@@ -111,13 +111,19 @@ def extract_part(
                 continue
             image = crop.cut(page, band)
             top_row, bottom_row = crop.staff_rows(page, system, band)
+            # The score's own barlines, not this staff's ink: a note stem
+            # crosses one staff, a barline crosses the system.
+            system_cols = [
+                c - band.x0 for c in reflow.system_barlines(page, system)
+                if band.x0 < c < band.x1
+            ]
             limit = setup.source_width_limit_px(band.space, page.page.dpi)
             keep_label = labels == "all" or (labels == "first" and not segments)
             segments.extend(
                 reflow.segments_for_band(
                     image, band, top_row, bottom_row,
                     max_source_width=limit, dpi=page.page.dpi,
-                    keep_label_on_first=keep_label,
+                    keep_label_on_first=keep_label, barline_cols=system_cols,
                 )
             )
             pages_used.append(page.page.index)
