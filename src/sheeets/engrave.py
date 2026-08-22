@@ -83,13 +83,57 @@ class LilyPondEngraver:
 
 
 def _with_layout(source: str, staff_size: float, paper: str, landscape: bool) -> str:
-    """Put the size and paper in, after the \\version line musicxml2ly writes."""
+    """Give the file our page and staff size, and take away the score's.
+
+    musicxml2ly writes its own `\paper` block and its own
+    `#(set-global-staff-size)`, both derived from the *source* document — which
+    here is a scan of a nineteen-stave conductor's score.  So a part engraved
+    without this came out on a 41.6 x 30.0 cm sheet at staff size 14.5, with all
+    388 measures crammed onto one landscape page, and a 3.2 cm indent on the
+    first system.  Those settings are inherited furniture, not choices; strip
+    them and put ours in their place.
+    """
+    source = _drop_lines(source, "#(set-global-staff-size")
+    source = _drop_block(source, "\\paper")
+    # musicxml2ly labels every system after the first with a short instrument
+    # name it invents ("Voice") when the MusicXML has no part-abbreviation.  A
+    # part is one instrument; it does not need its name down the margin.
+    source = _drop_lines(source, "\\set Staff.shortInstrumentName")
+    source = _drop_lines(source, "\\set DrumStaff.shortInstrumentName")
+    source = _drop_lines(source, "\\set PianoStaff.shortInstrumentName")
+
     block = [
-        f'#(set-global-staff-size {staff_size:g})',
+        f"#(set-global-staff-size {staff_size:g})",
         f'#(set-default-paper-size "{paper}"{" (quote landscape)" if landscape else ""})',
+        "\\paper {",
+        "    indent = 1.2\\cm",
+        "    short-indent = 0\\cm",
+        "    ragged-last-bottom = ##t",
+        "}",
     ]
     match = re.search(r'^\\version\s+"[^"]+"\s*$', source, flags=re.M)
     if not match:
         return "\n".join(block) + "\n" + source
     at = match.end()
     return source[:at] + "\n" + "\n".join(block) + source[at:]
+
+
+def _drop_lines(source: str, prefix: str) -> str:
+    return "\n".join(line for line in source.splitlines()
+                     if not line.strip().startswith(prefix))
+
+
+def _drop_block(source: str, keyword: str) -> str:
+    """Remove `keyword { ... }`, counting braces so a nested one cannot fool it."""
+    match = re.search(re.escape(keyword) + r"\s*\{", source)
+    if not match:
+        return source
+    depth = 0
+    for index in range(match.end() - 1, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[: match.start()] + source[index + 1 :]
+    return source
