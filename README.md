@@ -335,7 +335,7 @@ repository, and the tests draw their own synthetic pages (`tools/make_fixture.py
 ## Tests
 
 ```console
-python -m pytest          # 65 tests, no score and no OMR engine required
+python -m pytest          # 125 tests, no score and no OMR engine required
 ```
 
 ## Licence
