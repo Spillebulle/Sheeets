@@ -127,12 +127,19 @@ class LineCandidate:
 
 def line_candidates(
     ink: np.ndarray,
-    min_width_frac: float = 0.20,
+    min_width_frac: float = 0.04,
     max_thickness: float = 6.0,
     run_frac: float = 0.03,
     drift: int = 1,
 ) -> list[LineCandidate]:
     """Find the long thin horizontal things on a page.
+
+    The width floor is deliberately low.  A staff line is not always found in
+    one piece: where the print has faded, one line comes back as five or six
+    fragments of a tenth of the page each.  Filtering fragments by width here
+    threw those lines away — and with them the two faded systems at the top of
+    the crooked part — so the floor only rejects specks, and the real width
+    test is applied after the fragments of a line have been put back together.
 
     `drift` lets a line wander vertically by that many pixels and still count
     as one run.  It matters more than it sounds: a page whose skew *varies*
@@ -337,6 +344,7 @@ class ProjectionDetector:
         self,
         threshold: int | None = 160,
         min_width_frac: float = 0.20,
+        fragment_frac: float = 0.04,
         max_thickness: float = 6.0,
         run_frac: float = 0.03,
         deskew: bool = True,
@@ -345,6 +353,7 @@ class ProjectionDetector:
     ) -> None:
         self.threshold = threshold
         self.min_width_frac = min_width_frac
+        self.fragment_frac = fragment_frac
         self.max_thickness = max_thickness
         self.run_frac = run_frac
         self.deskew = deskew
@@ -355,7 +364,7 @@ class ProjectionDetector:
     def _candidates(self, arr: np.ndarray, ink=None) -> list[LineCandidate]:
         return line_candidates(
             binarise(arr, self.threshold) if ink is None else ink(arr),
-            min_width_frac=self.min_width_frac,
+            min_width_frac=self.fragment_frac,
             max_thickness=self.max_thickness,
             run_frac=self.run_frac,
         )
@@ -426,7 +435,12 @@ class ProjectionDetector:
             return DetectedPage(page=page, image=image, systems=[], space=0.0, skew_deg=skew,
                                 notes={"reason": "could not estimate staff spacing"})
         merged = merge_fragments(cands, x_ref, tolerance=0.45 * space)
-        groups = comb_staves([y for y, _ in merged], space)
+        # Now that the pieces of each line are back together, ask how wide the
+        # line really is.  A staff line runs most of the way across; a slur or
+        # a beam does not.
+        wide = [(y, w) for y, w in merged if w >= self.min_width_frac * image.shape[1]]
+        groups = comb_staves([y for y, _ in wide], space)
+        groups = recover_gaps(groups, [y for y, _ in wide], space)
         staves = [
             Staff(lines=g, space=float(np.median(np.diff(g))),
                   **_extent(g, cands, x_ref, space, image.shape[1]))
@@ -440,8 +454,61 @@ class ProjectionDetector:
             systems=systems,
             space=space,
             skew_deg=skew,
-            notes={"line_candidates": len(cands), "merged_lines": len(merged)},
+            notes={"line_candidates": len(cands), "merged_lines": len(merged),
+                   "wide_lines": len(wide)},
         )
+
+
+def recover_gaps(
+    groups: list[list[float]], ys: list[float], space: float,
+    tolerance: float = 0.18, min_lines: int = 3,
+) -> list[list[float]]:
+    """Look again where the layout says a staff should be.
+
+    Music is laid out on a grid, so a gap of exactly two staves' spacing in an
+    otherwise even column of staves is not a wide margin — it is a staff that
+    was not found.  Knowing *where* to look is what makes it safe to look with
+    weaker evidence: three lines instead of four, which would invent staves all
+    over the page if applied everywhere.
+
+    On the three-player page this recovers the glockenspiel staff, whose middle
+    lines are buried under beamed semiquavers.
+    """
+    if len(groups) < 3:
+        return groups
+    tops = [g[0] for g in groups]
+    order = sorted(range(len(groups)), key=lambda i: tops[i])
+    sorted_tops = [tops[i] for i in order]
+    gaps = np.diff(sorted_tops)
+    if gaps.size < 2:
+        return groups
+    typical = float(np.median(gaps))
+    if typical <= 0:
+        return groups
+
+    recovered: list[list[float]] = []
+    for gap, top in zip(gaps, sorted_tops):
+        if abs(gap - 2 * typical) > tolerance * 2 * typical:
+            continue
+        target = top + typical
+        found = []
+        for k in range(5):
+            want = target + k * space
+            near = [y for y in ys if abs(y - want) <= 0.4 * space]
+            if near:
+                found.append((k, min(near, key=lambda y: abs(y - want))))
+        if len(found) < min_lines:
+            continue
+        indices = [k for k, _ in found]
+        positions = [y for _, y in found]
+        slope, intercept = np.polyfit(indices, positions, 1)
+        if not (0.75 * space <= slope <= 1.25 * space):
+            continue
+        fitted = [slope * k + intercept for k in range(5)]
+        if max(abs(y - fitted[k]) for k, y in found) > 0.25 * space:
+            continue
+        recovered.append(fitted)
+    return sorted(groups + recovered, key=lambda g: g[0])
 
 
 def _extent(lines: list[float], cands: list[LineCandidate], x_ref: float,

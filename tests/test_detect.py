@@ -58,3 +58,53 @@ def test_reports_why_a_blank_page_found_nothing():
     result = detect(blank)
     assert result.systems == []
     assert "reason" in result.notes
+
+
+def test_a_line_broken_into_fragments_is_still_a_line():
+    """Where print has faded, one staff line comes back as several pieces.
+
+    Filtering pieces by width before putting them back together threw away two
+    whole systems of the crooked part in the fleet.
+    """
+    from PIL import Image, ImageDraw
+
+    space = 11
+    image = Image.new("L", (2000, 400), 255)
+    draw = ImageDraw.Draw(image)
+    top = 150
+    for k in range(5):
+        y = top + k * space
+        if k in (1, 3):
+            # a faded line: drawn in pieces, none of them wide on its own
+            for x0 in range(150, 1850, 260):
+                draw.line([(x0, y), (x0 + 170, y)], fill=0, width=2)
+        else:
+            draw.line([(150, y), (1850, y)], fill=0, width=2)
+    result = detect(image)
+    assert len(result.staves) == 1
+    assert abs(result.staves[0].top - top) <= 2
+
+
+def test_a_staff_is_recovered_where_the_grid_says_one_belongs():
+    """A gap of exactly two staves' spacing is a staff that was not found."""
+    from sheeets.detect.projection import recover_gaps
+
+    space = 11.0
+    groups = [[100 + k * space for k in range(5)],
+              [300 + k * space for k in range(5)],
+              # the staff at 500 is missing
+              [700 + k * space for k in range(5)],
+              [900 + k * space for k in range(5)]]
+    ys = [y for g in groups for y in g] + [500.0, 522.0, 544.0]  # three lines survive
+    recovered = recover_gaps(groups, ys, space)
+    assert len(recovered) == 5
+    assert any(abs(g[0] - 500) < 2 for g in recovered)
+
+
+def test_nothing_is_invented_where_the_grid_is_even():
+    from sheeets.detect.projection import recover_gaps
+
+    space = 11.0
+    groups = [[100 + i * 200 + k * space for k in range(5)] for i in range(4)]
+    ys = [y for g in groups for y in g]
+    assert len(recover_gaps(groups, ys, space)) == 4
