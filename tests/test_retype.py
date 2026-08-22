@@ -179,3 +179,22 @@ def test_a_correction_has_to_look_like_the_misreading():
     assert _plausible_misread("2", "27")       # a digit lost
     assert _plausible_misread("16", "18")      # one digit confused
     assert not _plausible_misread("3", "97")   # nothing in common
+
+
+def test_a_scatter_of_digits_is_not_a_numbering():
+    """A part that numbers its systems numbers all of them.  Five readings
+    across thirty-one systems is noise, and it once said a 77-measure part was
+    twelve bars long — which would then have been used to repair it."""
+    from sheeets.barnum import SystemFacts
+    from sheeets.retype import _numbers_are_worth_using
+
+    scatter = [SystemFacts(0, n, number=(1 if n in (0, 20) else None))
+               for n in range(31)]
+    assert not _numbers_are_worth_using(scatter)
+
+    numbered = [SystemFacts(0, n, number=n * 8 + 1) for n in range(22)]
+    assert _numbers_are_worth_using(numbered)
+
+    # One system unread out of twenty-two is still a numbering.
+    numbered[7] = SystemFacts(0, 7, number=None)
+    assert _numbers_are_worth_using(numbered)

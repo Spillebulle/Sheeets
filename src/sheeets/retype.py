@@ -250,7 +250,10 @@ def retype(
     # many bars each system holds.  Read before recognition because the count
     # is worth reporting whether or not an engine is any good.
     facts = barnum.survey(extraction.detected) if _is_a_part(extraction) else []
-    wanted = barnum.bars_wanted(facts) if facts else {}
+    if not _numbers_are_worth_using(facts):
+        facts, wanted = [], {}
+    else:
+        wanted = barnum.bars_wanted(facts)
     bars_by_page = count_bars_by_page(extraction)
     if facts:
         counted = _bars_from_numbers(facts, wanted)
@@ -705,6 +708,27 @@ def _pad(tree, span, want: int, where: str, notes: list[str]) -> None:
         score_xml.pad_system(tree, span, short)
         notes.append(f"{where}: {short} bar(s) the page has and the recognition does "
                      f"not; put in as rests so the numbering stays right — proofread them")
+
+
+def _numbers_are_worth_using(facts, share: float = 0.6, least: int = 3) -> bool:
+    """Does this part actually print bar numbers?
+
+    Many do not, and a part that does not still offers a few digit-shaped
+    things above its staves — a page number, a fingering, a smudge.  On the
+    worst scan in the fleet, a 77-measure part with no numbers at all yielded
+    five readings, two of them the same "1" on different pages, and the run
+    chosen from them said the part was twelve bars long.  That number then
+    replaced a barline count that was roughly right, and — far worse — would
+    have been used to "repair" the recognition against.
+
+    So the numbers are used only when most of the systems carry one.  A part
+    that numbers its systems numbers all of them; a scatter of readings across
+    a third of the page is not a numbering, it is noise.
+    """
+    if not facts:
+        return False
+    read = [f for f in facts if f.number is not None]
+    return len(read) >= least and len(read) >= share * len(facts)
 
 
 def _bars_from_numbers(facts, wanted) -> dict[int, int]:
