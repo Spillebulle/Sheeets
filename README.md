@@ -115,6 +115,22 @@ scan, 64 measure(s) that do not add up — needs proofreading
 So a flagged bar is never just a number: it comes with the page of the score it
 came from, which is what makes fixing it quick.
 
+**Installing an engine.** Neither is bundled. Audiveris is much the better of
+the two and takes a build; these are the steps that worked here (Ubuntu 24.04):
+
+```console
+sudo apt install openjdk-21-jdk tesseract-ocr tesseract-ocr-eng lilypond
+git clone https://github.com/Audiveris/audiveris && cd audiveris
+git checkout 5.6.3          # master needs Java 25; 5.6.3 builds on 21
+./gradlew :app:installDist
+export SHEEETS_AUDIVERIS=$PWD/app/build/install/app/bin/Audiveris
+export TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata
+```
+
+oemer is one command — `pip install oemer` — but it needs `numpy<2` and
+`onnxruntime==1.16.3` alongside it, so give it its own virtualenv and point
+`SHEEETS_OEMER` at that. `sheeets engines` then says what it can see.
+
 **Which engine, and what to feed it.** Two are wired up: `oemer` (pip install,
 neural, quick to set up) and `audiveris` (Java, has to be built, much better).
 Neither ships with Sheeets. By default the engine is handed **the original score
@@ -239,5 +255,5 @@ repository, and the tests draw their own synthetic pages (`tools/make_fixture.py
 ## Tests
 
 ```console
-python -m pytest          # 34 tests, no score required
+python -m pytest          # 65 tests, no score and no OMR engine required
 ```

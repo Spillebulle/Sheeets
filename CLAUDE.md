@@ -70,7 +70,7 @@ Stages are independent and registered, and that is worth protecting:
 
 ```console
 pip install -e .[dev]
-python -m pytest                                    # 62 tests, no score needed
+python -m pytest                                    # 65 tests, no score needed
 sheeets engines                                     # what is installed here
 sheeets inspect score.pdf --pages 3- --overlay out/ # what is on the page
 sheeets extract score.pdf --part bottom -o part.pdf
