@@ -169,6 +169,36 @@ sheeets retype  score.pdf --part bottom --pages 3- -o fresh.pdf \
 The extracted part is finished work; the retyped one is a draft with a list of
 what to check.
 
+## A book with every part in it
+
+Band libraries often hold one PDF per piece with every player's pages inside
+it, one after another. `sheeets parts` finds the boundaries:
+
+```console
+$ sheeets parts book.pdf --split parts/
+book.pdf: 20 part(s), title read as 'rulebritannia'
+  p1   1-3          3 page(s)  Soloist
+  p4   4-4          1 page(s)  Soprano
+  p5   5-6          2 page(s)  Solo Cornet
+  ...
+  p27  27-28        2 page(s)  Bass Eb
+  p29  29-30        2 page(s)  Bass Bb
+  p31  31-31        1 page(s)  Percussion
+  wrote 20 file(s) to parts/
+```
+
+It works off the **title**: every part's first page carries it at the top next
+to that player's name, and no continuation page does. The title is found as the
+longest run of letters that recurs across the headers, compared letters-only so
+that "RULE BRITANNIA." and "RULE B RITANNIA”" are the same string. Where OCR
+truncates it, two weaker signals make up the difference — enough of the title
+to be unmistakable, and a line that *begins* with a player's name.
+
+`--split DIR` writes one PDF per player; `--manifest FILE.json` writes the same
+list as fleet cases, so a book can be added to a test fleet in one command.
+Either way you can also skip the splitting entirely and pass `--pages 5-6`
+straight to `extract`.
+
 ## How it works
 
 Six stages, each replaceable, wired together in `pipeline.py`:

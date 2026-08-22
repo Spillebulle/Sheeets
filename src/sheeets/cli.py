@@ -91,6 +91,13 @@ def build_parser() -> argparse.ArgumentParser:
                      help="write the proofreading report (page by page) as JSON")
     ret.add_argument("--quiet", action="store_true")
 
+    bk = subs.add_parser("parts", parents=[common],
+                         help="find which pages hold which player, in a book of parts")
+    bk.add_argument("--split", metavar="DIR",
+                    help="also write one PDF per player into this folder")
+    bk.add_argument("--manifest", metavar="FILE.json",
+                    help="write the parts as fleet cases")
+
     subs.add_parser("engines", help="list the OMR engines and the engraver found here")
     return parser
 
@@ -102,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
     dpi = args.dpi if args.dpi == "auto" else float(args.dpi)
     if args.command == "inspect":
         return _inspect(args, dpi)
+    if args.command == "parts":
+        return _parts(args, dpi)
     if args.command == "retype":
         return _retype(args, dpi)
     return _extract(args, dpi)
@@ -192,6 +201,30 @@ def _retype(args, dpi) -> int:
         print(f"  report:          {args.report}")
     if not result.trustworthy:
         print("  read it against the scan before playing from it")
+    return 0
+
+
+def _parts(args, dpi) -> int:
+    from . import book
+
+    _, detected, _ = analyse(args.score, pages=args.pages, dpi=dpi)
+    found = book.split(detected, source_name=args.score)
+    if not found.parts:
+        print("no parts found; is there a title at the top of each part's first page?")
+        return 1
+    print(f"{args.score}: {len(found.parts)} part(s), title read as {found.title!r}")
+    for part in found.parts:
+        print(f"  p{part.first_page:<4}{part.pages:<10} {part.count:>3} page(s)  {part.name}")
+    if args.split:
+        written = book.write_parts(args.score, found, Path(args.split))
+        print(f"  wrote {len(written)} file(s) to {args.split}")
+    if args.manifest:
+        import json
+
+        Path(args.manifest).write_text(
+            json.dumps({"cases": found.as_cases(str(Path(args.score).resolve()))}, indent=2)
+        )
+        print(f"  manifest: {args.manifest}")
     return 0
 
 
