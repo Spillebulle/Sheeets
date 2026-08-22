@@ -25,17 +25,37 @@ def barlines(
     top_row: int,
     bottom_row: int,
     threshold: int = 160,
-    coverage: float = 0.95,
+    coverage: float = 0.90,
     merge_within: int = 4,
 ) -> list[int]:
-    """Columns (band coordinates) where a barline crosses the staff."""
+    """Columns (band coordinates) where a barline crosses the staff.
+
+    Two things are being told apart, and both matter:
+
+    * A **stem** also runs vertically through the staff, but it hangs off a
+      notehead, so it reaches one outer line and not the other.  Requiring ink
+      at both ends is what rejects it — without that, a bar of quavers offers a
+      cut point every couple of centimetres.
+    * A **printed barline** in a scan is not perfect.  Measured on page 3 of the
+      score this was written against, the real barlines cover 93-95 % of the
+      staff and their top pixel lands one or two rows under the fitted line.
+      Testing the outermost row exactly, at 95 %, rejected three barlines in a
+      row and left a 970 px stretch of music with no legal cut in it — so the
+      layout cut in the middle of bar 4.
+
+    So: measure coverage over the staff *inset* by a few rows, and look for the
+    ends within a small zone rather than on one exact row.
+    """
     top_row = max(0, top_row)
     bottom_row = min(band_image.shape[0] - 1, bottom_row)
     if bottom_row - top_row < 4:
         return []
     ink = band_image[top_row : bottom_row + 1] < threshold
-    fraction = ink.mean(axis=0)
-    touches_ends = ink[:2].any(axis=0) & ink[-2:].any(axis=0)
+    height = ink.shape[0]
+    inset = max(1, int(round(0.08 * height)))
+    fraction = ink[inset : height - inset].mean(axis=0)
+    zone = inset + 1
+    touches_ends = ink[:zone].any(axis=0) & ink[-zone:].any(axis=0)
     hits = np.nonzero((fraction >= coverage) & touches_ends)[0]
     if hits.size == 0:
         return []
@@ -53,7 +73,7 @@ def cut_points(
     max_width: int,
     barline_cols: list[int],
     start: int = 0,
-    snap: float = 0.35,
+    snap: float = 0.45,
 ) -> list[tuple[int, int]]:
     """Split [start, width) into pieces no wider than max_width, at barlines.
 
@@ -66,18 +86,29 @@ def cut_points(
     span = width - start
     if max_width <= 0 or span <= max_width:
         return [(start, width)]
-    count = int(-(-span // max_width))  # ceil
-    ideal = span / count
+
     pieces: list[tuple[int, int]] = []
     x = start
-    for k in range(1, count):
-        target = start + ideal * k
-        window = snap * ideal
-        candidates = [b for b in barline_cols if x < b <= min(x + max_width, target + window)
-                      and abs(b - target) <= window]
-        cut = int(min(candidates, key=lambda b: abs(b - target))) if candidates else int(target)
+    while width - x > max_width:
+        # Re-divide what is left on every pass, so snapping one cut early does
+        # not push a stub onto the end of the line.
+        remaining = width - x
+        count = int(-(-remaining // max_width))  # ceil
+        target = x + remaining / count
+        window = snap * (remaining / count)
+        reachable = [b for b in barline_cols if x < b <= x + max_width]
+        near = [b for b in reachable if abs(b - target) <= window]
+        # Prefer a barline near where the piece wanted to end; failing that,
+        # the furthest one that still fits, because any barline beats slicing a
+        # bar in half.
+        if near:
+            cut = int(min(near, key=lambda b: abs(b - target)))
+        elif reachable:
+            cut = int(max(reachable))
+        else:
+            cut = int(min(target, x + max_width))
         if cut <= x:
-            continue
+            cut = int(x + max_width)
         pieces.append((x, cut))
         x = cut
     pieces.append((x, width))

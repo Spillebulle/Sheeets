@@ -39,8 +39,28 @@ def test_a_narrow_system_is_left_alone():
 
 def test_a_bar_wider_than_the_page_is_cut_anyway():
     pieces = cut_points(3000, 1000, [1500])
-    assert len(pieces) == 3
     assert all(b - a <= 1000 for a, b in pieces)
+    # The one barline there is gets used even though it leaves a short line:
+    # a short line is a cosmetic problem, a sliced bar is a musical one.
+    assert 1500 in [b for _, b in pieces[:-1]]
+
+
+def test_a_cut_never_lands_mid_bar_when_a_barline_is_in_reach():
+    # Bars far wider than the snap window: the aim lands between barlines every
+    # time, and the fallback has to pull it back onto one.  This is the defect
+    # that put a cut through the middle of bar 4 of the first real part.
+    cols = [400, 900, 1400, 1900, 2400, 2900]
+    pieces = cut_points(3200, 1000, cols)
+    assert all(b - a <= 1000 for a, b in pieces)
+    assert all(b in cols for _, b in pieces[:-1])
+
+
+def test_a_faint_barline_is_still_a_barline():
+    # Real print: 93 % coverage and the top pixel a row short of the fitted
+    # line.  Testing the exact outer row at 95 % rejected three in a row.
+    band = band_with_barlines([500])
+    band[10:12, 500:503] = 255  # rub out the top of it
+    assert barlines(band, 10, 50)
 
 
 def test_scale_targets_a_real_staff_size():

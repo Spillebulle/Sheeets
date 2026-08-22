@@ -91,14 +91,55 @@ first (`ceil(width / max)`), aiming for equal widths and snapping each aim to
 the nearest barline within 35 % gives lines that look deliberate. Same score, 87
 pieces greedy vs 81 even.
 
-## Barlines: 95 % and both ends
+## Barlines: both ends, and don't be fussy about the middle
 
 A barline is a column of ink spanning the staff. So is a note stem — measured on
 this percussion part, stems reach about 85 % of the staff height, and at that
-threshold a bar of quavers offered a "barline" every couple of centimetres. The
-test that separates them is coverage ≥ 95 % *and* ink in the top two and bottom
-two rows. On p4's percussion staff that took 23 candidates down to the 9 real
-barlines.
+threshold a bar of quavers offered a "barline" every couple of centimetres. What
+separates them is **ink at both ends**: a stem hangs off a notehead and reaches
+one outer line, not both. On p4's percussion staff that took 23 candidates down
+to 9.
+
+Being strict about the ends was then wrong in the other direction. Measured on
+p3, the real barlines cover 93–95 % of the staff and their top pixel lands one
+or two rows *under* the fitted staff line — the fit is a least-squares line
+through a scan, not a ruler. Testing the outermost row exactly, at 95 %,
+rejected three consecutive barlines and left a 970 px stretch of music with no
+legal cut point in it, so the layout put a cut through the middle of bar 4. The
+fix: measure coverage over the staff inset by 8 %, and look for the ends within
+a small zone rather than on one exact row. Same page, 6 barlines → 12.
+
+Belt and braces on top of that: if the aimed-for cut has no barline within the
+snap window, take the furthest barline that still fits rather than cutting where
+the aim landed. A short line is a cosmetic problem; a sliced bar is a musical
+one.
+
+## What belongs to a staff, and what belongs to the page
+
+A part is unplayable without the words around the staff — "S.Dr.", "+ B.Dr.",
+the dynamic under the bar. A fixed pad cannot capture them: 3.5 spaces clipped
+"mf + B.Dr." in half, and 6 spaces pulled in the copyright line.
+
+Measured below the percussion staff, distance in staff spaces:
+
+| page | what is there | where |
+|---|---|---|
+| p4 | `mf + B.Dr.` | 3.1 – 4.9 |
+| p3 | `ff`, `S.Dr.` | 0.1 – 2.9 |
+| p3 | footnote and `© Copyright 2005 by OBRASSO-VERLAG AG…` | 4.0 – 7.2 |
+
+There is **no clear row** between the last two on p3 — the ink is continuous
+from the staff to the copyright — so "grow until a blank gap" cannot separate
+them, and neither can distance. What does separate them is how the ink is *set*:
+a line of text is one long unbroken stretch, 144–186 px per row for the
+copyright, where `mf + B.Dr.` measures 105 px end to end. So the band grows to
+the midpoint of the neighbouring staff (or 6 spaces at the edge of the page) and
+then gives back any *block* of rows that reads as text.
+
+Block, not row: the top rows of a text line, where only the tall letters reach,
+are as sparse as any marking. Judged row by row they pass, and the part comes
+out with the tops of "© Copyright 2005 b" sliced along its bottom edge — which
+is exactly what the first version did.
 
 ## Sizes, for reference
 
