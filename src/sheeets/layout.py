@@ -24,25 +24,39 @@ from .model import Staff, System
 
 def joined(image, upper: Staff, lower: Staff, threshold: int = 160,
            min_columns: int = 1) -> bool:
-    """Is there a barline bridging the gap between these two staves?
+    """Is there a barline running through both staves and the gap between?
 
-    Looked for across the whole width, not just at the left edge.  The left
-    edge alone seemed the obvious place — that is where a system's bracket is —
-    but it depends on knowing exactly where the staff starts, and when a staff
-    line is detected a little short the window misses the barline and a
-    nineteen-stave system splits in two.  Every barline in a system joins its
-    staves, so there is no need to be fussy about which one is found.
+    Three versions of this were wrong before this one, each in an instructive
+    way.  Looking at the *left edge* alone depends on knowing exactly where the
+    staff starts, and a staff line detected a little short splits a
+    nineteen-stave system in two.  Looking across the whole width but only at
+    the *gap* is worse on hand-copied manuscript, where a stray stroke between
+    two systems joins them and a whole page collapses into one system.
+
+    What a system barline does that neither of those catches is run the full
+    height — through the upper staff, through the gap, and through the lower
+    one.  Nothing in a part does that, because a part's barlines stop at their
+    own staff.
     """
     if image is None:
         return False
-    top = int(round(upper.bottom))
-    bottom = int(round(lower.top))
-    if bottom - top < 3:
+    top = int(round(upper.top))
+    bottom = int(round(lower.bottom))
+    if bottom - top < 6:
         return True
-    gap = image[top + 1 : bottom, :] < threshold
-    if gap.size == 0:
+    # Only where the music is.  A scan often has a dark border down one edge —
+    # on the hand-copied part in the fleet it is 65 columns wide — and it runs
+    # the height of the page, so it "joins" every staff to every other and the
+    # whole sheet collapses into one system.
+    space = upper.space or lower.space or 10.0
+    left = max(0, int(min(upper.x0, lower.x0) - space))
+    right = min(image.shape[1], int(max(upper.x1, lower.x1) + space))
+    if right - left < 4:
+        return False
+    span = image[top:bottom, left:right] < threshold
+    if span.size == 0:
         return True
-    return int((gap.mean(axis=0) > 0.9).sum()) >= min_columns
+    return int((span.mean(axis=0) > 0.9).sum()) >= min_columns
 
 
 def group_systems(
