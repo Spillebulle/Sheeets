@@ -114,6 +114,32 @@ snap window, take the furthest barline that still fits rather than cutting where
 the aim landed. A short line is a cosmetic problem; a sliced bar is a musical
 one.
 
+**And then: one staff is not enough to find a barline at all.** All of the above
+reads a single staff, which is fine on a percussion part with a note every other
+bar and wrong everywhere else. Counted staff by staff across one system of this
+score — a system with 13 bars in it:
+
+| staff | "barlines" found |
+|---|---|
+| Soprano Cornet | 25 |
+| Solo Cornet | 34 |
+| 1st Trombone | 16 |
+| Timpani | 15 |
+| Optional Percussion | 11 |
+| Solo Horn (semiquavers throughout) | **43** |
+
+A stem that runs from a ledger line above the staff to the bottom line passes
+every test a barline passes, and dense music is full of them. So the cornet part
+was being cut at stems.
+
+What a barline has and a stem has not is that **it crosses the other staves at
+the same place**. Summing the per-staff hits across the system and keeping the
+columns with support from 30 % of the staves collapses the cornet's 43 to the
+same 13 the percussion gives, and agrees with Audiveris exactly on three of the
+first four pages (17 against 13 on the other, which is the page with the title
+block on it). The layout cuts at those columns now, so any part of the score is
+cut at the score's own bars.
+
 ## What belongs to a staff, and what belongs to the page
 
 A part is unplayable without the words around the staff — "S.Dr.", "+ B.Dr.",
