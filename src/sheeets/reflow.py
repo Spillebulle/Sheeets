@@ -109,7 +109,14 @@ def system_barlines(
         spans = staff_spans_ink(page.image, top, bottom)
         votes[: spans.size] += spans.astype(np.int32)
 
-    needed = max(2, int(round(support * len(system.staves))))
+    # Two staves must agree, which is what rejects a stem.  A system of one
+    # staff is the exception and not a rare one: an extracted *part* is one
+    # staff per system, and so is every publisher's part in the fleet.  There
+    # is no second opinion to be had there, so take the one staff's answer —
+    # the strict test in `staff_spans_ink` is all that separates a barline from
+    # a stem on a part, and on a part-sized staff it does the job.  Demanding
+    # two votes made the count zero, which read as "no bars in the scan".
+    needed = min(len(system.staves), max(2, int(round(support * len(system.staves)))))
     hits = np.nonzero(votes >= needed)[0]
     if hits.size == 0:
         return []

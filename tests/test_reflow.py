@@ -119,3 +119,37 @@ def test_a_zero_width_piece_is_dropped_not_exported():
                 x1=0, y1=10, space=11.0, music_x0=0)
     empty = np.full((10, 0), 255, np.uint8)
     assert segments_for_band(empty, band, 0, 5, max_source_width=100, dpi=300) == []
+
+
+def test_a_one_staff_system_still_has_barlines():
+    """A part is one staff per system, and its bars still have to be counted.
+
+    Cross-staff support asks two staves to agree, which is what tells a barline
+    from a note stem in a score.  A part has no second staff to ask, and the
+    rule as written demanded two votes however many staves there were — so
+    every publisher's part counted zero bars in the scan and the retype had
+    nothing to check the recognition against.
+    """
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    from sheeets.detect.projection import ProjectionDetector
+    from sheeets.model import PageImage
+    from sheeets.reflow import system_barlines
+
+    space = 16
+    image = Image.new("L", (1600, 300), 255)
+    draw = ImageDraw.Draw(image)
+    top = 120
+    for k in range(5):
+        draw.line([(150, top + k * space), (1500, top + k * space)], fill=0, width=2)
+    for x in (150, 600, 1050, 1500):
+        draw.line([(x, top), (x, top + 4 * space)], fill=0, width=3)
+    # A stem: it hangs off a notehead, so it reaches one outer line, not both.
+    draw.line([(820, top), (820, top + 3 * space)], fill=0, width=3)
+
+    page = ProjectionDetector().detect(PageImage(index=0, array=np.asarray(image), dpi=300))
+    system = page.systems[0]
+    assert len(system.staves) == 1
+    found = system_barlines(page, system)
+    assert len(found) == 4, found

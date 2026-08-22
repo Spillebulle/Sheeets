@@ -522,14 +522,30 @@ def _extent(lines: list[float], cands: list[LineCandidate], x_ref: float,
     first system of a three-player page came back as three separate systems
     while every later page was read correctly.
     """
-    mine = [
-        c for c in cands
-        if min(abs(c.y_at(x_ref) - line) for line in lines) <= 0.4 * space
+    per_line: list[list[LineCandidate]] = [[] for _ in lines]
+    for c in cands:
+        y = c.y_at(x_ref)
+        nearest = min(range(len(lines)), key=lambda i: abs(y - lines[i]))
+        if abs(y - lines[nearest]) <= 0.4 * space:
+            per_line[nearest].append(c)
+    spans = [
+        (min(c.x0 for c in group), max(c.x1 for c in group))
+        for group in per_line if group
     ]
-    if not mine:
+    if not spans:
         return {"x0": 0, "x1": width}
-    return {"x0": int(np.median([c.x0 for c in mine])),
-            "x1": int(np.median([c.x1 for c in mine]))}
+    # Each line first, then the median across the five.  A line arrives in
+    # pieces — a tie, a slur or the thick bar of a multi-measure rest lands at
+    # the same height and is filtered in with it — so the median *fragment*
+    # is a fragment somewhere in the middle of the staff, not the staff's
+    # edge.  Measured on a publisher's timpani part, that put x0 at 1051 px on
+    # a staff that starts at 205, which moved the bar-number crop, the join
+    # test and the barline window all into the middle of the music.  Joining
+    # each line's pieces first and then taking the median across the lines
+    # keeps both guards: a stray run cannot stretch the staff, because four
+    # other lines have to agree.
+    return {"x0": int(np.median([s[0] for s in spans])),
+            "x1": int(np.median([s[1] for s in spans]))}
 
 
 def _looks_complete(result: DetectedPage, original: np.ndarray,

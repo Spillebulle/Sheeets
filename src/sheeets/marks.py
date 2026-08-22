@@ -84,7 +84,19 @@ def find_boxes(
 
 
 def read_box(image: np.ndarray, box: tuple[int, int, int, int], pad: int = 3) -> str:
-    """OCR the inside of one box: a single letter or number."""
+    """OCR the inside of one box: a single letter or number.
+
+    Deliberately plain, and it was made less plain once and put back.  Two
+    apparently better ideas — isolating the letter from the frame by connected
+    components, and enlarging it to about 150 px before reading — were tried
+    against the twenty-two boxes of this score, where the right answer is
+    known: the plain crop reads a run of A to O and each clever version breaks
+    it, turning C into K or D into G.  Tesseract is doing its own thresholding
+    and layout work on what it is handed, and handing it a tight, resampled
+    glyph takes that away.
+
+    So: the inside of the box, at its own size, with white around it.
+    """
     if not shutil.which("tesseract"):
         return ""
     x, y, w, h = box
@@ -149,7 +161,7 @@ def tidy_sequence(texts: list[str]) -> tuple[list[str], list[str], list[int]]:
                 best_length[i] = best_length[j] + 1
                 previous[i] = j
     if not any(best_length):
-        return list(texts), [], list(range(len(texts)))
+        return [], _gave_up(texts), []
 
     end = max(range(len(texts)), key=lambda i: best_length[i])
     chain: list[int] = []
@@ -158,7 +170,7 @@ def tidy_sequence(texts: list[str]) -> tuple[list[str], list[str], list[int]]:
         end = previous[end]
     chain.reverse()
     if len(chain) < 3:
-        return list(texts), [], list(range(len(texts)))
+        return [], _gave_up(texts), []
 
     notes: list[str] = []
     kept: list[int] = []
@@ -210,10 +222,25 @@ def tidy_sequence(texts: list[str]) -> tuple[list[str], list[str], list[int]]:
         letters.append(expected)
         expected = chr(ord(expected) + 1)
 
+    if letters[0] != "A":
+        # Rehearsal letters begin at A.  A run that starts anywhere else is a
+        # run of misreadings that happen to ascend, and placing it would put
+        # the wrong letter over every bar it names — worse than placing none,
+        # because a player trusts a letter.  Measured on a publisher's part
+        # whose boxes are small and whose frames are broken: the longest
+        # ascending run of what could be read was F to P, over marks that are
+        # in fact A to O.
+        return [], notes + [f"the letters read run from {letters[0]!r}, not from 'A'; "
+                            f"none of them are used"], []
     dropped = [texts[i] for i in range(len(texts)) if i not in kept]
     for text in dropped:
         notes.append(f"dropped {text!r}: not part of the run")
     return letters, notes, sorted(kept)
+
+
+def _gave_up(texts: list[str]) -> list[str]:
+    return [f"read {' '.join(t for t in texts if t)!r} above the staves, "
+            f"which is not a run of rehearsal letters; none of them are used"]
 
 
 def measure_of(mark: Mark, barlines: list[int]) -> int:

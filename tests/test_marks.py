@@ -4,11 +4,28 @@ import shutil
 
 import numpy as np
 import pytest
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 from sheeets.marks import Mark, find_boxes, find_marks, measure_of
 
 SPACE = 11.0
+
+
+def _serif(size):
+    """A real typeface, at a size that fills the box the way an engraving does.
+
+    The default PIL bitmap font draws a letter six pixels wide inside a box of
+    sixty, which no engraver has ever done, and a reader written against that
+    fixture is not written against rehearsal marks.
+    """
+    for name in ("/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
+                 "/usr/share/fonts/truetype/freefont/FreeSerifBold.ttf",
+                 "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"):
+        try:
+            return ImageFont.truetype(name, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
 
 
 def page_with_box(letter="A", side=50, at=(400, 100), extra_noise=True):
@@ -16,7 +33,12 @@ def page_with_box(letter="A", side=50, at=(400, 100), extra_noise=True):
     draw = ImageDraw.Draw(image)
     x, y = at
     draw.rectangle([x, y, x + side, y + side], outline=0, width=3)
-    draw.text((x + side // 2 - 3, y + side // 2 - 6), letter, fill=0)
+    if letter.strip():
+        font = _serif(int(side * 0.62))
+        box = draw.textbbox((0, 0), letter, font=font)
+        draw.text((x + (side - (box[2] - box[0])) // 2 - box[0],
+                   y + (side - (box[3] - box[1])) // 2 - box[1]),
+                  letter, fill=0, font=font)
     if extra_noise:
         # A slur and a dynamic in the same band must not be mistaken for a box.
         draw.arc([700, 110, 900, 170], start=200, end=340, fill=0, width=3)
@@ -97,10 +119,21 @@ def test_a_chain_that_starts_late_is_extended_backwards():
     assert len(kept) == 15  # the stray "Y" is gone
 
 
-def test_a_sequence_that_is_not_a_run_is_left_alone():
+def test_too_few_to_judge_are_left_alone():
     from sheeets.marks import tidy_sequence
 
-    # Marks numbered rather than lettered, or too few to judge.
-    for reads in (["1", "2", "3", "4"], ["A", "B"]):
-        got, notes, kept = tidy_sequence(reads)
-        assert got == reads and notes == []
+    got, notes, kept = tidy_sequence(["A", "B"])
+    assert got == ["A", "B"] and notes == []
+
+
+def test_what_is_not_a_run_of_letters_is_not_used():
+    """Wrong marks are worse than no marks: a player trusts a letter."""
+    from sheeets.marks import tidy_sequence
+
+    # Marks numbered rather than lettered.
+    got, notes, kept = tidy_sequence(["1", "2", "3", "4"])
+    assert got == [] and kept == [] and notes
+
+    # A run that ascends but does not begin at A is a run of misreadings.
+    got, notes, kept = tidy_sequence(["O", "H", "F", "G", "H", "I", "J", "K"])
+    assert got == [] and kept == [] and notes

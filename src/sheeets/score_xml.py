@@ -622,3 +622,223 @@ def check(tree: ET.ElementTree) -> list[MeasureCheck]:
 def count_measures(tree: ET.ElementTree) -> int:
     part = tree.getroot().find("part")
     return len(part.findall("measure")) if part is not None else 0
+
+
+def systems_of(tree: ET.ElementTree) -> list[tuple[int, int]]:
+    """Where each system starts and ends, as measure indices [start, end).
+
+    Audiveris marks a system break with `<print new-system="yes">` on the first
+    measure of the new system, which is how a page's recognised measures can be
+    lined up with the systems a human sees on that page.  `smooth_seams` throws
+    these away later, on purpose — they are the *scan's* layout, not the fresh
+    part's — so anything that needs them has to ask before that happens.
+    """
+    part = tree.getroot().find("part")
+    if part is None:
+        return []
+    measures = part.findall("measure")
+    starts = [0]
+    for index, measure in enumerate(measures):
+        if index == 0:
+            continue
+        printing = measure.find("print")
+        if printing is not None and printing.get("new-system") == "yes":
+            starts.append(index)
+    return [(a, b) for a, b in zip(starts, starts[1:] + [len(measures)])]
+
+
+def multi_rests_in(tree: ET.ElementTree, span: tuple[int, int]) -> list[tuple[int, int]]:
+    """(measure index, count) for every multi-measure rest inside one system."""
+    part = tree.getroot().find("part")
+    if part is None:
+        return []
+    measures = part.findall("measure")
+    out: list[tuple[int, int]] = []
+    for index in range(span[0], min(span[1], len(measures))):
+        element = measures[index].find(".//multiple-rest")
+        if element is not None and (element.text or "").strip().isdigit():
+            out.append((index, int(element.text.strip())))
+    return out
+
+
+def set_multi_rest(tree: ET.ElementTree, index: int, count: int) -> int:
+    """Make the multi-measure rest at `index` last `count` bars.
+
+    Audiveris writes a multi-measure rest out *expanded*: the first measure
+    carries `<multiple-rest>7</multiple-rest>` and six more empty measures
+    follow it.  So changing the count means changing the number and adding or
+    removing that many measures — and the measures to copy are right there, so
+    the added ones are real bar rests in the right metre rather than something
+    invented.
+
+    Returns how many measures were added (negative if removed).
+    """
+    part = tree.getroot().find("part")
+    if part is None:
+        return 0
+    measures = part.findall("measure")
+    if not 0 <= index < len(measures):
+        return 0
+    element = measures[index].find(".//multiple-rest")
+    if element is None:
+        return 0
+    was = int((element.text or "0").strip() or 0)
+    if count == was or count < 1:
+        return 0
+    element.text = str(count)
+    change = count - was
+    children = list(part)
+    at = children.index(measures[index])
+    if change > 0:
+        template = measures[index + 1] if index + 1 < len(measures) else measures[index]
+        for step in range(change):
+            copy = _copy_bar_rest(template)
+            part.insert(at + was + step, copy)
+    else:
+        for _ in range(-change):
+            victim = at + count
+            if victim + 1 < len(list(part)):
+                part.remove(list(part)[victim])
+    _renumber(part)
+    return change
+
+
+def _copy_bar_rest(template: ET.Element) -> ET.Element:
+    """A fresh empty measure modelled on one of the rest's own bars."""
+    copy = ET.fromstring(ET.tostring(template))
+    for tag in ("print", "barline"):
+        for child in list(copy.findall(tag)):
+            copy.remove(child)
+    for holder in copy.iter():
+        for child in list(holder):
+            if child.tag == "multiple-rest":
+                holder.remove(child)
+    return copy
+
+
+def _renumber(part: ET.Element) -> None:
+    for number, measure in enumerate(part.findall("measure"), start=1):
+        measure.set("number", str(number))
+
+
+def written_bars(tree: ET.ElementTree, span: tuple[int, int]) -> list[tuple[int, int | None]]:
+    """The bars a system *prints*, and how long each one lasts.
+
+    Audiveris writes a multi-measure rest out expanded — one measure carrying
+    the count and then that many silent measures behind it — so the recognised
+    measures inside a system do not line up one for one with the bars on the
+    page.  Walking the span and stepping over each rest's own measures gives
+    the printed bars back, which is the sequence a page can be compared with.
+    """
+    part = tree.getroot().find("part")
+    if part is None:
+        return []
+    measures = part.findall("measure")
+    out: list[tuple[int, int | None]] = []
+    index = span[0]
+    while index < min(span[1], len(measures)):
+        element = measures[index].find(".//multiple-rest")
+        count = None
+        if element is not None and (element.text or "").strip().isdigit():
+            count = int(element.text.strip())
+        out.append((index, count))
+        index += max(1, count or 1)
+    return out
+
+
+def make_multi_rest(tree: ET.ElementTree, index: int, count: int) -> int:
+    """Turn one measure into a multi-measure rest of `count` bars.
+
+    Used when the page plainly shows the thick bar and the engine read the bar
+    as music instead.  Nothing is invented by doing this: a multi-measure rest
+    has no content beyond its length, so the page's number is the whole of it.
+    """
+    part = tree.getroot().find("part")
+    if part is None:
+        return 0
+    measures = part.findall("measure")
+    if not 0 <= index < len(measures) or count < 1:
+        return 0
+    measure = measures[index]
+    keep = [child for child in measure
+            if child.tag in {"print", "attributes", "direction"}]
+    for child in list(measure):
+        measure.remove(child)
+    for child in keep:
+        measure.append(child)
+    attributes = measure.find("attributes")
+    if attributes is None:
+        attributes = ET.Element("attributes")
+        measure.insert(1 if measure.find("print") is not None else 0, attributes)
+    for style in list(attributes.findall("measure-style")):
+        attributes.remove(style)
+    style = ET.SubElement(attributes, "measure-style")
+    ET.SubElement(style, "multiple-rest").text = str(count)
+    note = ET.SubElement(measure, "note")
+    note.set("print-object", "no")
+    rest = ET.SubElement(note, "rest")
+    rest.set("measure", "yes")
+    ET.SubElement(note, "duration").text = str(_divisions_before(part, index) or 4)
+    at = list(part).index(measure)
+    for step in range(count - 1):
+        part.insert(at + 1 + step, _copy_bar_rest(measure))
+    _renumber(part)
+    return count - 1
+
+
+def _divisions_before(part: ET.Element, index: int) -> int:
+    """A whole bar's worth of divisions, as the part has said so far."""
+    divisions, beats, beat_type = 0, 4, 4
+    for number, measure in enumerate(part.findall("measure")):
+        if number > index:
+            break
+        for attributes in measure.findall("attributes"):
+            text = attributes.findtext("divisions")
+            if text and text.strip().isdigit():
+                divisions = int(text.strip())
+            time = attributes.find("time")
+            if time is not None:
+                if (time.findtext("beats") or "").strip().isdigit():
+                    beats = int(time.findtext("beats").strip())
+                if (time.findtext("beat-type") or "").strip().isdigit():
+                    beat_type = int(time.findtext("beat-type").strip())
+    if not divisions:
+        return 0
+    return int(divisions * 4 * beats / beat_type)
+
+
+def pad_system(tree: ET.ElementTree, span: tuple[int, int], extra: int) -> int:
+    """Add `extra` empty bars at the end of a system.
+
+    The last resort, and it exists because of what a part is for.  When the
+    printed bar numbers say a system holds ten bars and only seven were read,
+    the three that are missing cannot be recovered — but leaving them out is
+    worse than marking them, because every bar number after that point is then
+    wrong, and a part whose numbers do not match the conductor's score cannot
+    be used at a rehearsal at all.  So the bars are put in as rests and
+    reported, and the player checks three bars against the original instead of
+    counting the whole piece again.
+    """
+    part = tree.getroot().find("part")
+    if part is None or extra < 1:
+        return 0
+    measures = part.findall("measure")
+    last = min(span[1], len(measures)) - 1
+    if last < 0:
+        return 0
+    template = measures[last]
+    at = list(part).index(template)
+    for step in range(extra):
+        part.insert(at + 1 + step, _blank_bar(template, _divisions_before(part, last)))
+    _renumber(part)
+    return extra
+
+
+def _blank_bar(template: ET.Element, duration: int) -> ET.Element:
+    measure = ET.Element("measure")
+    note = ET.SubElement(measure, "note")
+    note.set("print-object", "no")
+    rest = ET.SubElement(note, "rest")
+    rest.set("measure", "yes")
+    ET.SubElement(note, "duration").text = str(duration or 4)
+    return measure

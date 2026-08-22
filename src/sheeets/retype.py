@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Sequence
 
-from . import crop, marks as marks_mod, score_xml
+from . import barnum, crop, marks as marks_mod, score_xml
 from .engrave import LilyPondEngraver
 from .model import Extraction
 from .paper import PageSetup
@@ -245,9 +245,24 @@ def retype(
         write_extraction(extraction, draft, setup=PageSetup(staff_mm=omr_staff_mm),
                          heading=False)
 
+    # What the page itself says about its bars, where it is a part and says
+    # anything: the printed bar numbers, the multi-measure rest counts, and how
+    # many bars each system holds.  Read before recognition because the count
+    # is worth reporting whether or not an engine is any good.
+    facts = barnum.survey(extraction.detected) if _is_a_part(extraction) else []
+    wanted = barnum.bars_wanted(facts) if facts else {}
     bars_by_page = count_bars_by_page(extraction)
+    if facts:
+        counted = _bars_from_numbers(facts, wanted)
+        if counted:
+            bars_by_page = counted
     bars = sum(bars_by_page.values())
-    say(f"{bars} bars counted in the scan")
+    printed = [f.number for f in facts if f.number is not None]
+    if printed:
+        say(f"{bars} bars, from the bar numbers printed on the part "
+            f"({len(printed)} of {len(facts)} systems carry one)")
+    else:
+        say(f"{bars} bars counted in the scan")
 
     # 2. Recognition, one page at a time.
     #
@@ -326,9 +341,14 @@ def retype(
                 tree = score_xml.select_staff(page_tree, staff_of_page[page_index])
                 if graft:
                     grafted += score_xml.graft_directions(page_tree, tree)
+                # Repair before placing: a mark is put at a measure, and the
+                # repair is what decides which measure a printed bar is.
+                for line in _reconcile(tree, facts, wanted, page_index):
+                    say(line)
+                    warnings.append(line)
                 found = marks_of_page.get(page_index)
                 if found:
-                    lettered += score_xml.add_rehearsal_marks(tree, found)
+                    lettered += _place_marks(tree, found)
             trees.append(tree)
             read_pages.append((page_index, score_xml.count_measures(tree)))
         except Exception as exc:
@@ -398,43 +418,94 @@ def retype(
     return result
 
 
-def _find_marks(extraction: Extraction, say) -> dict[int, list[tuple[int, str]]]:
-    """Rehearsal letters, read off the score by shape, per page.
+def _find_marks(extraction: Extraction, say) -> dict[int, list[tuple[int, int, str]]]:
+    """Rehearsal letters, read off the page by shape: page -> (system, bar, text).
 
     They are found on the page rather than in the recognised MusicXML because
     the OMR engine does not see them: a boxed letter above a nineteen-stave
     system is not text it can pick out, but it is the most distinctive shape on
     the page.  See `sheeets.marks`.
-    """
-    places: list[tuple[int, int]] = []  # (page index, measure index)
-    letters: list[str] = []
-    for page in extraction.detected:
-        if not page.systems:
-            continue
-        system = page.systems[0]
-        top = system.staves[0]
-        found = marks_mod.find_marks(page.image, top.top, top.space)
-        if not found:
-            continue
-        bars = system_barlines(page, system)
-        for mark in found:
-            places.append((page.page.index, marks_mod.measure_of(mark, bars)))
-            letters.append(mark.text)
 
+    Every system on the page is looked at, not only the first.  On a score
+    there is one system to a page and it made no difference; on a *part* there
+    are a dozen, and looking at the first alone found three letters out of
+    fifteen and put them in the wrong bars.
+
+    One setting for the box detector, not a search over several.  A looser
+    setting was tried, on the reasoning that a part's printed frames are often
+    broken: it doubles the boxes found, and on this score the extra ones read
+    as a *longer* run — A to U where the piece has A to O — so a search that
+    keeps the longest run would confidently place six marks that do not exist.
+    A run is good evidence that what was read is real; it is not evidence that
+    nothing else was invented.
+
+    The place is kept as (system, bar within that system) rather than as a
+    measure number, because a multi-measure rest is one bar on the page and
+    several measures in the recognition, so the two only line up once the
+    recognised systems are in hand.
+    """
+    places, letters = _read_boxes(extraction)
     tidied, corrections, kept = marks_mod.tidy_sequence(letters)
     for line in corrections:
         say(f"rehearsal mark: {line}")
+    if tidied:
+        say("rehearsal marks: " + " ".join(tidied))
+    else:
+        say("rehearsal marks: none could be read with confidence; "
+            "the fresh part carries none — put them in by hand")
+    return _by_page(places, tidied, kept)
+
+
+def _by_page(places, letters, kept) -> dict[int, list[tuple[int, int, str]]]:
     # Strays can be dropped from anywhere in the run, so line the places up
     # with the items that survived rather than with what was read.
-    places = [places[i] for i in kept] if len(kept) == len(tidied) else places
-    letters = tidied
-
-    out: dict[int, list[tuple[int, str]]] = {}
-    for (page_index, measure_index), text in zip(places, letters):
-        out.setdefault(page_index, []).append((measure_index, text))
-    if letters:
-        say("rehearsal marks: " + " ".join(letters))
+    here = [places[i] for i in kept] if len(kept) == len(letters) else places
+    out: dict[int, list[tuple[int, int, str]]] = {}
+    for (page_index, system_index, bar), text in zip(here, letters):
+        out.setdefault(page_index, []).append((system_index, bar, text))
     return out
+
+
+def _read_boxes(extraction: Extraction):
+    places: list[tuple[int, int, int]] = []  # page, system, bar in system
+    letters: list[str] = []
+    for page in extraction.detected:
+        floor = 0.0
+        for system_index, system in enumerate(page.systems):
+            if not system.staves:
+                continue
+            top = system.staves[0]
+            # How far above the staff to look.  On a score, twelve spaces of
+            # empty margin; on a part there is another system that close, and
+            # searching into it turned its noteheads and multi-measure rest
+            # numbers into rehearsal boxes.  Never look past the staff above.
+            reach = min(12.0, max(1.5, (top.top - floor) / top.space - 0.3))
+            floor = system.staves[-1].bottom
+            found = marks_mod.find_marks(page.image, top.top, top.space,
+                                         reach_spaces=reach)
+            if not found:
+                continue
+            bars = system_barlines(page, system)
+            for mark in found:
+                places.append((page.page.index, system_index,
+                               marks_mod.measure_of(mark, bars)))
+                letters.append(mark.text)
+    return places, letters
+
+
+def _place_marks(tree, found: list[tuple[int, int, str]]) -> int:
+    """Turn (system, bar) places into measure numbers and write the marks in."""
+    spans = score_xml.systems_of(tree)
+    placed: list[tuple[int, str]] = []
+    for system_index, bar, text in found:
+        if system_index >= len(spans):
+            continue
+        printed = score_xml.written_bars(tree, spans[system_index])
+        if not printed:
+            continue
+        index = printed[min(bar, len(printed) - 1)][0]
+        placed.append((index, text))
+    return score_xml.add_rehearsal_marks(tree, placed)
 
 
 def _rasterise(pdf: Path, folder: Path, dpi: float) -> list[tuple[int, Path]]:
@@ -472,3 +543,179 @@ def _rasterise_source(
 def _brief(exc: Exception) -> str:
     text = str(exc).strip().splitlines()
     return text[-1][:200] if text else exc.__class__.__name__
+
+
+def _is_a_part(extraction: Extraction) -> bool:
+    """Is this source a part rather than a score?
+
+    One staff per system is what makes a part a part, and it is also what makes
+    the page's own bar numbers and multi-measure rest counts belong to the
+    music being extracted.  On a score they belong to whichever instrument is
+    printed at the top of the system, which is not the one being cut out, so
+    reading them there would be worse than not reading them at all.
+    """
+    systems = [s for page in extraction.detected for s in page.systems]
+    return bool(systems) and all(len(s.staves) == 1 for s in systems)
+
+
+def _fit_counts(read: list[int | None], target: int) -> tuple[list[int] | None, str]:
+    """Make the multi-measure rest counts add up to what the page demands.
+
+    The total is not in doubt: the difference between two printed bar numbers
+    is exactly how many bars the system holds, so once the written bars are
+    counted the rests' total is forced.  Every count read off the page is then
+    checked against it, which turns a pile of small OCR answers into one
+    arithmetic question with a right answer.
+
+    One unreadable count is solved for.  One *wrong* count can also be solved
+    for, but only when a single position can be changed to fix the sum and the
+    new value looks like a misreading of what was read there — 4 for 44, 3 for
+    8 — rather than an unrelated number.  Anything less certain is refused and
+    reported, because a part with a rest of the wrong length is worse than a
+    part that says it does not know.
+    """
+    if not read:
+        return ([], "") if target == 0 else (None, "there are no multi-bar rests")
+    blanks = [i for i, count in enumerate(read) if count is None]
+    known = sum(count for count in read if count is not None)
+    if len(blanks) > 1:
+        return None, f"{len(blanks)} of its multi-bar rests could not be read"
+    if len(blanks) == 1:
+        value = target - known
+        if value < 2:
+            return None, "the unreadable multi-bar rest would have to be under two bars"
+        out = [value if count is None else count for count in read]
+        return out, f"one multi-bar rest could not be read; the bar numbers make it {value}"
+    counts = [int(count) for count in read]
+    if sum(counts) == target:
+        return counts, ""
+    fixes = []
+    for i, count in enumerate(counts):
+        value = target - (sum(counts) - count)
+        if 2 <= value <= 200 and _plausible_misread(str(count), str(value)):
+            fixes.append((i, value))
+    if len(fixes) == 1:
+        i, value = fixes[0]
+        out = list(counts)
+        was = out[i]
+        out[i] = value
+        return out, f"a multi-bar rest read as {was}; the bar numbers make it {value}"
+    return None, (f"its multi-bar rests {counts} add up to {sum(counts)} "
+                  f"where the bar numbers want {target}")
+
+
+def _plausible_misread(read: str, wanted: str) -> bool:
+    """Could `wanted` have been read as `read` by an OCR of small digits?"""
+    if read == wanted:
+        return True
+    if wanted in read or read in wanted:       # 4 read as 44, 27 read as 2
+        return True
+    if len(read) == len(wanted):               # one digit confused for another
+        return sum(a != b for a, b in zip(read, wanted)) == 1
+    return False
+
+
+def _reconcile(tree, facts, wanted, page_index: int) -> list[str]:
+    """Make the recognised bars agree with the numbers printed on the page.
+
+    An engine reads a multi-measure rest by reading the number over it, and
+    that is the number it is worst at: measured on a publisher's timpani part,
+    every two-digit count came back with its tens digit missing — 16 as 6, 24
+    as 4, 34 as 4 — so a 401-bar part was recognised as 255 bars.  Nothing
+    inside the MusicXML can notice that.  The printed bar numbers can, because
+    the difference between two of them is exactly how many bars lie between.
+
+    So: where the page says a system holds N bars and the recognition produced
+    a different number, and the page's own multi-measure rests can account for
+    the difference, the rests are set to what the page says.  Where they cannot,
+    nothing is changed and the disagreement is reported — a part that says it
+    is unsure is worth more than one that quietly invents bars.
+    """
+    if not facts:
+        return []
+    notes: list[str] = []
+    mine = [f for f in facts if f.page_index == page_index]
+    spans = score_xml.systems_of(tree)
+    if len(mine) != len(spans):
+        return [f"page {page_index + 1}: the scan shows {len(mine)} system(s) and "
+                f"the recognition {len(spans)}; the printed bar numbers were not used"]
+    for fact, span in reversed(list(zip(mine, spans))):
+        want = wanted.get((fact.page_index, fact.system_index))
+        if want is None:
+            continue
+        printed = score_xml.written_bars(tree, span)
+        where = f"page {page_index + 1} system {fact.system_index + 1}"
+        if span[1] - span[0] == want:
+            continue
+        if len(printed) != fact.written:
+            notes.append(f"{where}: the page has {fact.written} written bar(s) and the "
+                         f"recognition {len(printed)}; the printed bar numbers say "
+                         f"{want} bar(s) but nothing could be lined up")
+            _pad(tree, span, want, where, notes)
+            continue
+        counts, note = _fit_counts(fact.rests, want - len(printed) + len(fact.rests))
+        if counts is None:
+            notes.append(f"{where}: the page says {want} bar(s) and "
+                         f"{span[1] - span[0]} were read, but {note}")
+            _pad(tree, span, want, where, notes)
+            continue
+        if note:
+            notes.append(f"{where}: {note}")
+        by_bar = dict(zip(fact.rest_bars, counts))
+        for bar in reversed(range(len(printed))):
+            index, was = printed[bar]
+            now = by_bar.get(bar)
+            if now == was:
+                continue
+            if now is None:
+                notes.append(f"{where}: bar {bar + 1} was read as a rest of {was} bar(s) "
+                             f"and the page shows no such rest — cut to one bar, check it")
+                score_xml.set_multi_rest(tree, index, 1)
+            elif was is None:
+                notes.append(f"{where}: bar {bar + 1} is a {now}-bar rest on the page "
+                             f"and was not read as one — put back")
+                score_xml.make_multi_rest(tree, index, now)
+            else:
+                notes.append(f"{where}: a multi-bar rest read as {was}, "
+                             f"the page prints {now}")
+                score_xml.set_multi_rest(tree, index, now)
+    return notes
+
+
+def _pad(tree, span, want: int, where: str, notes: list[str]) -> None:
+    """Keep the bar count right even when the bars themselves are lost."""
+    short = want - (span[1] - span[0])
+    if short > 0:
+        score_xml.pad_system(tree, span, short)
+        notes.append(f"{where}: {short} bar(s) the page has and the recognition does "
+                     f"not; put in as rests so the numbering stays right — proofread them")
+
+
+def _bars_from_numbers(facts, wanted) -> dict[int, int]:
+    """Bars per page, taken from the numbers printed on the part.
+
+    Counting barlines is an estimate — it made 414 of a part of 401 bars.  The
+    printed numbers are not an estimate: the difference between two of them is
+    the answer, and it holds across a system whose own number was not read,
+    because the bars are still between the two that were.  They are counted
+    against the page the earlier number is on, which is where all but the last
+    of them are.
+
+    The last system has no successor to be subtracted from, so its own written
+    bars and rests are used.  That is the only guess here and it is confined to
+    one system.
+    """
+    known = [f for f in facts if f.number is not None]
+    if len(known) < 2:
+        return {}
+    out: dict[int, int] = {}
+    for this, following in zip(known, known[1:]):
+        out[this.page_index + 1] = out.get(this.page_index + 1, 0) + (
+            following.number - this.number
+        )
+    last = facts[-1]
+    tail = last.written - len(last.rests) + sum(c or 0 for c in last.rests)
+    if last.number is not None and last is not known[-1]:
+        tail = 0
+    out[last.page_index + 1] = out.get(last.page_index + 1, 0) + max(0, tail)
+    return out
