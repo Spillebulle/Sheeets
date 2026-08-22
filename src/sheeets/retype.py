@@ -77,6 +77,7 @@ class RetypeResult:
     warnings: list[str] = field(default_factory=list)
     spans: list[PageSpan] = field(default_factory=list)
     bars_by_page: dict[int, int] = field(default_factory=dict)
+    proof_pdf: Path | None = None
 
     @property
     def bad_measures(self) -> list[MeasureCheck]:
@@ -183,6 +184,8 @@ def retype(
     workdir: str | Path | None = None,
     keep: bool = False,
     reuse: bool = False,
+    jobs: int = 1,
+    proof: str | Path | None = None,
     progress: Progress | None = None,
 ) -> RetypeResult:
     """Extract a part, read it, and set it again as a fresh PDF."""
@@ -248,26 +251,56 @@ def retype(
         staff_of_page = {}
         images = _rasterise(draft, holder / "pages", dpi=omr_dpi)
 
-    say(f"reading {len(images)} page(s) with {recognizer.name}, from the {read_from}")
+    say(f"reading {len(images)} page(s) with {recognizer.name}, from the {read_from}"
+        + (f", {jobs} at a time" if jobs > 1 else ""))
+
+    def read_one(item: tuple[int, Path]) -> tuple[int, Path]:
+        page_index, image = item
+        cached = holder / "xml" / f"{image.stem}.musicxml"
+        if reuse and cached.exists():
+            return page_index, cached
+        return page_index, recognizer.recognize_page(image, holder / "xml")
+
+    produced: list[tuple[int, Path]] = []
+    if jobs > 1:
+        # The engines are subprocesses, so threads are the right shape here and
+        # a page is entirely independent of its neighbours.  Audiveris takes
+        # about four minutes on a nineteen-stave page; three at a time turns a
+        # two-hour run into forty minutes.
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        with ThreadPoolExecutor(max_workers=jobs) as pool:
+            futures = {pool.submit(read_one, item): item for item in images}
+            done = 0
+            for future in as_completed(futures):
+                page_index, image = futures[future]
+                done += 1
+                try:
+                    produced.append(future.result())
+                    say(f"  page {done}/{len(images)} done (p{page_index + 1})")
+                except Exception as exc:
+                    warnings.append(f"page {page_index + 1}: {_brief(exc)}")
+                    say(f"  page {done}/{len(images)} FAILED (p{page_index + 1})")
+    else:
+        for n, item in enumerate(images, start=1):
+            try:
+                produced.append(read_one(item))
+                say(f"  page {n}/{len(images)} done")
+            except Exception as exc:
+                warnings.append(f"page {item[0] + 1}: {_brief(exc)}")
+                say(f"  page {n}/{len(images)} FAILED")
+
     trees = []
     read_pages: list[tuple[int, int]] = []
-    for n, (page_index, image) in enumerate(images, start=1):
-        cached = holder / "xml" / f"{image.stem}.musicxml"
+    for page_index, produced_path in sorted(produced):  # back into playing order
         try:
-            if reuse and cached.exists():
-                produced_path = cached
-                say(f"  page {n}/{len(images)} reused")
-            else:
-                produced_path = recognizer.recognize_page(image, holder / "xml")
-                say(f"  page {n}/{len(images)} read")
             tree = score_xml.read(produced_path)
             if read_from == "score":
                 tree = score_xml.select_staff(tree, staff_of_page[page_index])
             trees.append(tree)
             read_pages.append((page_index, score_xml.count_measures(tree)))
-        except Exception as exc:  # an engine failing one page must not lose the rest
+        except Exception as exc:
             warnings.append(f"page {page_index + 1}: {_brief(exc)}")
-            say(f"  page {n}/{len(images)} FAILED")
     if not trees:
         raise RuntimeError(f"{recognizer.name} could not read any page")
 
@@ -310,6 +343,11 @@ def retype(
         spans=spans,
         bars_by_page=bars_by_page,
     )
+    if proof:
+        from .proof import write_proof
+
+        result.proof_pdf = write_proof(extraction, result, proof)
+        say(f"proof sheet: {result.proof_pdf}")
     say(result.summary())
     return result
 

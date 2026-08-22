@@ -124,9 +124,34 @@ own clef. `--read-from part` hands it the extracted part instead, which sounds
 simpler and reads worse: the draft's lines are pieces of systems, so most begin
 mid-phrase with no clef.
 
-`--workdir` keeps the page images and the per-page MusicXML; `--reuse` then
-skips recognition and re-does only the joining, checking and engraving, which
-turns a repeat run from an hour into seconds.
+`--jobs 3` reads three pages at once (the engines are subprocesses, and a
+nineteen-stave page takes Audiveris about four minutes). `--workdir` keeps the
+page images and the per-page MusicXML; `--reuse` then skips recognition and
+re-does only the joining, checking and engraving, which turns a repeat run from
+an hour into seconds.
+
+Because recognition in score mode is *per page* and the part is chosen
+afterwards, a second part from the same score costs nothing:
+
+```console
+sheeets retype score.pdf --part -2 -o timpani.pdf --workdir work/ --reuse
+```
+
+`--proof proof.pdf` writes the scan of every page whose bars were flagged, with
+the measure numbers to look at. The loop is: read the flag, look at the bar in
+the proof sheet, correct it in the MusicXML, done.
+
+**The whole process, start to finish:**
+
+```console
+sheeets inspect score.pdf --pages 3 --overlay out/     # which staff is the part
+sheeets extract score.pdf --part bottom --pages 3- -o part.pdf     # faithful
+sheeets retype  score.pdf --part bottom --pages 3- -o fresh.pdf \
+        --workdir work/ --jobs 3 --proof proof.pdf --report report.json
+```
+
+The extracted part is finished work; the retyped one is a draft with a list of
+what to check.
 
 ## How it works
 

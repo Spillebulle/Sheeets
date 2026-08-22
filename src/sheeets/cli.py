@@ -81,8 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
     ret.add_argument("--read-from", default="score", choices=["score", "part"],
                      help="give the engine the original score pages (default) or the "
                           "extracted part; the score reads better, see NOTES.md")
+    ret.add_argument("--jobs", type=int, default=1, metavar="N",
+                     help="recognise N pages at a time (the engines are subprocesses)")
     ret.add_argument("--reuse", action="store_true",
                      help="keep the MusicXML already in --workdir instead of reading again")
+    ret.add_argument("--proof", metavar="FILE.pdf",
+                     help="the scan of every page whose bars were flagged, to correct from")
     ret.add_argument("--report", metavar="FILE.json",
                      help="write the proofreading report (page by page) as JSON")
     ret.add_argument("--quiet", action="store_true")
@@ -153,7 +157,8 @@ def _retype(args, dpi) -> int:
         staff_size=args.staff_size, paper=args.page, landscape=args.landscape,
         part_name=args.name, title=args.title, read_from=args.read_from,
         workdir=args.workdir,
-        keep=bool(args.workdir), reuse=args.reuse, progress=progress,
+        keep=bool(args.workdir), reuse=args.reuse, jobs=args.jobs, proof=args.proof,
+        progress=progress,
     )
     for warning in result.warnings:
         print(f"warning: {warning}", file=sys.stderr)
@@ -178,6 +183,8 @@ def _retype(args, dpi) -> int:
         )
         more = f" (+{len(bad) - 15} more)" if len(bad) > 15 else ""
         print(f"  measures to proofread: {shown}{more}")
+    if result.proof_pdf:
+        print(f"  proof sheet:     {result.proof_pdf}")
     if args.report:
         import json
 

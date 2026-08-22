@@ -65,3 +65,31 @@ def test_a_suspect_measure_is_traced_back_to_its_page():
         {"measure": 12, "score_page": 4, "adds_up_to": "1/2", "should_be": "1"}
     ]
     assert report["pages"][1]["suspect"] == [12]
+
+
+def test_the_proof_sheet_shows_only_the_pages_worth_looking_at(score_pdf, tmp_path):
+    import pymupdf
+
+    from sheeets.proof import write_proof
+
+    extraction = extract_part(score_pdf, part="bottom")
+    bad = [MeasureCheck(n, Fraction(1, 2) if n == 12 else Fraction(1), Fraction(1), 1)
+           for n in range(1, 17)]
+    out = write_proof(extraction, result(checks=bad), tmp_path / "proof.pdf")
+    with pymupdf.open(out) as document:
+        text = "\n".join(page.get_text() for page in document)
+    # Measure 12 is on score page 4, and page 3 was clean, so only 4 is printed.
+    assert "score page 4" in text
+    assert "score page 3" not in text
+    assert "look at: 12" in text
+
+
+def test_a_clean_proof_sheet_says_there_is_nothing_to_do(score_pdf, tmp_path):
+    import pymupdf
+
+    from sheeets.proof import write_proof
+
+    extraction = extract_part(score_pdf, part="bottom")
+    out = write_proof(extraction, result(), tmp_path / "proof.pdf")
+    with pymupdf.open(out) as document:
+        assert "nothing flagged" in document[0].get_text()
