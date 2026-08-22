@@ -70,6 +70,11 @@ Stages are independent and registered, and that is worth protecting:
 
 - `sources.py` → `detect/` → `layout.py` → `select.py` → `crop.py` →
   `reflow.py` → `export/`, wired only in `pipeline.py`.
+- The retype half is `barnum.py` (read the page's own numbers) →
+  `recognize/` → `reconcile.py` (make the two agree) → `score_xml.py` →
+  `engrave.py`, wired only in `retype.py`.  `reconcile.py` is pure functions
+  over a tree and a list of facts; keep it that way, it is the part most
+  likely to need arguing with.
 - A stage may not import a later one. `detect/` must not know what an exporter
   is; `export/` must not know how staves were found.
 - New detector, exporter or recogniser: implement the protocol and `register()`.

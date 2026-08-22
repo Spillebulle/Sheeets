@@ -154,7 +154,7 @@ def test_the_whole_retype_runs_and_reports(score_pdf, tmp_path, monkeypatch):
 def test_the_counts_are_made_to_add_up_to_what_the_page_says():
     """The printed bar numbers settle the total, so each rest is checked
     against arithmetic rather than against a second opinion from OCR."""
-    from sheeets.retype import _fit_counts
+    from sheeets.reconcile import _fit_counts
 
     # Nothing to do.
     assert _fit_counts([7, 5], 12) == ([7, 5], "")
@@ -173,7 +173,7 @@ def test_the_counts_are_made_to_add_up_to_what_the_page_says():
 
 
 def test_a_correction_has_to_look_like_the_misreading():
-    from sheeets.retype import _plausible_misread
+    from sheeets.reconcile import _plausible_misread
 
     assert _plausible_misread("44", "4")       # a digit doubled
     assert _plausible_misread("2", "27")       # a digit lost
@@ -186,15 +186,15 @@ def test_a_scatter_of_digits_is_not_a_numbering():
     across thirty-one systems is noise, and it once said a 77-measure part was
     twelve bars long — which would then have been used to repair it."""
     from sheeets.barnum import SystemFacts
-    from sheeets.retype import _numbers_are_worth_using
+    from sheeets.reconcile import numbers_are_worth_using
 
     scatter = [SystemFacts(0, n, number=(1 if n in (0, 20) else None))
                for n in range(31)]
-    assert not _numbers_are_worth_using(scatter)
+    assert not numbers_are_worth_using(scatter)
 
     numbered = [SystemFacts(0, n, number=n * 8 + 1) for n in range(22)]
-    assert _numbers_are_worth_using(numbered)
+    assert numbers_are_worth_using(numbered)
 
     # One system unread out of twenty-two is still a numbering.
     numbered[7] = SystemFacts(0, 7, number=None)
-    assert _numbers_are_worth_using(numbered)
+    assert numbers_are_worth_using(numbered)
