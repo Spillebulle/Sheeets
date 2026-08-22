@@ -157,7 +157,7 @@ def _retype(args, dpi) -> int:
         staff_size=args.staff_size, paper=args.page, landscape=args.landscape,
         part_name=args.name, title=args.title, read_from=args.read_from,
         workdir=args.workdir,
-        keep=bool(args.workdir), reuse=args.reuse, jobs=args.jobs, proof=args.proof,
+        reuse=args.reuse, jobs=args.jobs, proof=args.proof,
         progress=progress,
     )
     for warning in result.warnings:

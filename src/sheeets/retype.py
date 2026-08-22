@@ -70,7 +70,7 @@ class RetypeResult:
     engine: str
     musicxml: Path | None
     fresh_pdf: Path | None
-    draft_pdf: Path
+    draft_pdf: Path | None
     bars_in_scan: int
     measures_read: int
     checks: list[MeasureCheck] = field(default_factory=list)
@@ -182,7 +182,6 @@ def retype(
     title: str = "",
     read_from: str = "score",
     workdir: str | Path | None = None,
-    keep: bool = False,
     reuse: bool = False,
     jobs: int = 1,
     proof: str | Path | None = None,
@@ -221,8 +220,14 @@ def retype(
     )
     if not extraction.segments:
         raise RuntimeError("nothing was extracted; check --part against `sheeets inspect`")
-    draft = holder / "draft.pdf"
-    write_extraction(extraction, draft, setup=PageSetup(staff_mm=omr_staff_mm), heading=False)
+    # The draft is only wanted when the engine is going to read *it*; in score
+    # mode nothing ever opens it, and writing one costs a minute of laying out
+    # ninety-four images that nobody sees.
+    draft = None
+    if read_from == "part":
+        draft = holder / "draft.pdf"
+        write_extraction(extraction, draft, setup=PageSetup(staff_mm=omr_staff_mm),
+                         heading=False)
 
     bars_by_page = count_bars_by_page(extraction)
     bars = sum(bars_by_page.values())
