@@ -557,28 +557,39 @@ one: below one note in ten they are furniture.
 - OCR labels. `name:` works through `pytesseract` if it is installed; it has
   never been run here, and the labels on a score are 2 mm high and abbreviated,
   so treat it as a convenience and check with `inspect --overlay`.
-- **How good a retype can get — measured, two sources of the same piece.**
+- **How good a retype can get — measured three ways on one piece.**
 
-  | | Optional Percussion (from the score) | Timpani (the publisher's part) |
-  |---|---|---|
-  | pages | 27 of a bound score | 2 |
-  | bars the source says it has | 414, by counting barlines | **403**, from the printed bar numbers |
-  | measures read | 402 | 402 |
-  | measures that do not add up | 8 (2 %) | 6 (1.5 %) |
-  | rehearsal marks recovered | A–O, all fifteen | none readable |
+  | | Optional Percussion, from the score | Timpani, from the score | Timpani, the publisher's part |
+  |---|---|---|---|
+  | source | bottom staff of 27 bound pages | second from the bottom, same pages | 2 clean engraved pages |
+  | bars the source says it has | 414, by counting barlines | 414, the same count | **403**, from the printed bar numbers |
+  | measures read | 402 | 402 | 402 |
+  | that do not add up | 41 (10 %) | 8 (2 %) | 6 (1.5 %) |
+  | rehearsal marks recovered | A–O, all fifteen | A–O | none readable |
 
-  The piece is **401 bars** — the part prints 398 above its last system and has
-  four bars after it. So two entirely separate readings, of two different
-  printings, by two different routes, agree to within one measure of each other
-  and of the truth. That is the strongest evidence the retype has produced.
+  The piece is **401 bars** — the publisher's part prints 398 above its last
+  system and has four bars after it, and the retyped percussion ends on a
+  fermata at bar 401.
+
+  Two of those columns are the *same instrument* read two ways: the score's
+  timpani staff, and the publisher's own printing of that part. They agree at
+  402 measures, and both are one over the truth. That is a controlled
+  comparison and it is the strongest evidence the retype has produced. The
+  third column is the harder job on the same page — percussion is two voices
+  of unpitched noteheads with nothing to check a pitch against — and it comes
+  out at five times the error rate. Worth stating plainly rather than averaging
+  the three into a claim about "OMR".
 
   Counting barlines made 414 of a 401-bar piece; the printed numbers made 403.
   Where a part carries numbers, they are the count to believe.
 
-  An earlier version of this table reported the Timpani row from a file that
-  had in fact been produced from the *score*, renamed. Two rows with identical
-  suspect-measure lists is what gave it away, and it is a good reason to keep
-  a report's `part` field honest.
+  An earlier version of this table had a Timpani column taken from a file
+  produced from the *score* and renamed, and then a Percussion column that was
+  in fact the score's timpani staff — `--part -2` on this score is Timpani and
+  `bottom` is Optional Percussion. Both times the giveaway was two columns
+  agreeing too well. If two readings of different music match to the measure,
+  suspect the labels before believing the result.
+
 - **Whether feeding the engine a bigger staff helps.** The draft is rendered at
   `--omr-staff-mm 2.2` and `--omr-dpi 400`; neither number has been varied.
 - **Retyping anything but the two parts from the bound score.** Detection is

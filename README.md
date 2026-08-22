@@ -292,18 +292,19 @@ turn. Every staff on every page is found, and the book is split into its twenty
 parts by name. The music is copyright and is not in this repository; see
 `FLEET.md`.
 
-**Measured, for the retype** — the same piece read twice, by two routes, from
-two different printings:
+**Measured, for the retype** — one piece read three ways:
 
-| | from the 27-page score | the publisher's 2-page part |
-|---|---|---|
-| measures read | 402 | 402 |
-| that do not add up | 8 (2 %) | 6 (1.5 %) |
-| rehearsal marks recovered | A–O, all fifteen | none readable |
+| | Optional Percussion, from the score | Timpani, from the score | Timpani, the publisher's part |
+|---|---|---|---|
+| measures read | 402 | 402 | 402 |
+| that do not add up | 41 (10 %) | 8 (2 %) | 6 (1.5 %) |
+| rehearsal marks recovered | A–O, all fifteen | A–O | none readable |
 
-The piece is 401 bars. Two independent readings agreeing to within one measure
-of each other and of the truth is the strongest evidence here — and it is still
-one piece of music.
+The piece is 401 bars. Two of those columns are the same instrument read two
+ways — the score's timpani staff and the publisher's own printing of that part
+— and they agree at 402 measures. The third is the harder job on the same page:
+percussion is two voices of unpitched noteheads with nothing to check a pitch
+against, and it comes out at five times the error rate.
 
 **Not verified:**
 
