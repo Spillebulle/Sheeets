@@ -377,9 +377,6 @@ def retype(
     for line in score_xml.tame_text(tree):
         say(line)
         warnings.append(line)
-    for line in score_xml.name_durations(tree):
-        say(line)
-        warnings.append(line)
     for line in score_xml.strip_stray_lyrics(tree):
         say(line)
         warnings.append(line)
@@ -391,6 +388,14 @@ def retype(
         say(f"{shown} whole-bar rest(s) made visible, so multi-bar rests are drawn "
             f"as one bar with a number rather than as empty bars")
     guesses = score_xml.fill_incomplete(tree)
+    # After the bar filler, not before it.  The filler pads a short bar with a
+    # rest of exactly the length that is missing, and that rest has no written
+    # value either — so naming the values first left fifteen unnamed rests in
+    # the file that goes to the engraver, and musicxml2ly died on them exactly
+    # as it did before the naming existed.
+    for line in score_xml.name_durations(tree):
+        say(line)
+        warnings.append(line)
     repairs.extend(str(g) for g in guesses)
     guessed = sorted({g.measure for g in guesses if g.measure})
     if guessed:

@@ -422,3 +422,30 @@ def test_a_quote_in_a_marking_does_not_end_the_lilypond_string():
     notes = tame_text(ET.ElementTree(root))
     assert words.text == "A'egro m0 to al ways"
     assert notes
+
+
+def test_a_bar_the_filler_pads_still_says_what_rest_it_is():
+    """A rest with a length and no written value is what musicxml2ly dies on,
+    so the filler must not create one — it did, and put the crash back."""
+    import xml.etree.ElementTree as ET
+
+    from sheeets.score_xml import fill_incomplete
+
+    root = ET.Element("score-partwise")
+    part = ET.SubElement(root, "part")
+    measure = ET.SubElement(part, "measure")
+    measure.set("number", "1")
+    attributes = ET.SubElement(measure, "attributes")
+    ET.SubElement(attributes, "divisions").text = "12"
+    time = ET.SubElement(attributes, "time")
+    ET.SubElement(time, "beats").text = "4"
+    ET.SubElement(time, "beat-type").text = "4"
+    note = ET.SubElement(measure, "note")
+    ET.SubElement(note, "pitch")
+    ET.SubElement(note, "duration").text = "36"        # three beats of four
+    ET.SubElement(note, "type").text = "half"
+
+    assert fill_incomplete(ET.ElementTree(root))
+    padding = measure.findall("note")[-1]
+    assert padding.find("rest") is not None
+    assert padding.findtext("type") == "quarter"

@@ -570,6 +570,11 @@ def fill_incomplete(tree: ET.ElementTree) -> list[Repair]:
             note = ET.SubElement(measure, "note")
             ET.SubElement(note, "rest")
             ET.SubElement(note, "duration").text = str(want - total)
+            # And say what rest it is.  A rest with a length and no written
+            # value is what musicxml2ly dies on, and a bar filled here without
+            # one puts the crash straight back — which is exactly what happened
+            # once the naming pass ran before this one instead of after it.
+            _name_one(note, (want - total) / max(1, div))
             out.append(Repair(
                 f"measure {number}: short by {Fraction(want - total, want)} of a bar; "
                 f"padded with a rest", measure=number, guess=True))
@@ -1001,6 +1006,13 @@ def name_durations(tree: ET.ElementTree) -> list[str]:
         notes.append(f"{shortened} of them were a length no single note can be, and "
                      f"were cut to the longest that fits — the bar is padded and flagged")
     return notes
+
+
+def _name_one(note: ET.Element, quarters: float) -> None:
+    """Give one note a written value from its length, if one fits exactly."""
+    name, dots, value = _nearest_value(quarters)
+    if name is not None and abs(value - quarters) < 1e-6:
+        _write_type(note, name, dots)
 
 
 def _nearest_value(quarters: float) -> tuple[str | None, int, float]:
