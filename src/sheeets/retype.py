@@ -264,17 +264,32 @@ def retype(
             warnings.append(line)
         wanted = barnum.bars_wanted(facts)
     bars_by_page = count_bars_by_page(extraction)
-    if facts:
-        counted = bars_from_numbers(facts, wanted)
-        if counted:
-            bars_by_page = counted
-    bars = sum(bars_by_page.values())
-    printed = [f.number for f in facts if f.number is not None]
-    if printed:
-        say(f"{bars} bars, from the bar numbers printed on the part "
-            f"({len(printed)} of {len(facts)} systems carry one)")
+    from_barlines = sum(bars_by_page.values())
+    counted = bars_from_numbers(facts, wanted) if facts else {}
+    from_numbers = sum(counted.values())
+    # The barline count is a poor measure and the printed numbers are an exact
+    # one — but only if they are the numbers.  On a hand-copied manuscript the
+    # digit-shaped ink above a staff is not a numbering, and a "total" three
+    # times what the page holds is that, not a discovery.  So the two have to
+    # be in the same country before the better one is taken — and the
+    # comparison has to count the bars a multi-measure rest hides, or every
+    # part that has any looks like a wild overcount.  On the timpani part the
+    # barlines see 147 bars and the piece is 401.
+    from_page = sum(f.written - len(f.rests) + sum(c or 0 for c in f.rests)
+                    for f in facts)
+    if counted and 0.6 * from_page <= from_numbers <= 1.6 * from_page:
+        bars_by_page = counted
+        say(f"{from_numbers} bars, from the bar numbers printed on the part "
+            f"({len([f for f in facts if f.number is not None])} of {len(facts)} "
+            f"systems carry one)")
     else:
-        say(f"{bars} bars counted in the scan")
+        if counted:
+            say(f"the numbers read above the staves would make this "
+                f"{from_numbers} bars where the page holds about {from_page}; "
+                f"they are not a bar numbering and are not used")
+            facts, wanted = [], {}
+        say(f"{from_barlines} bars counted in the scan")
+    bars = sum(bars_by_page.values())
 
     # 2. Recognition, one page at a time.
     #
