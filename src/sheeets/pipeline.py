@@ -16,7 +16,7 @@ from . import crop, export, reflow, select as select_mod
 from .detect import StaffDetector, get_detector
 from .model import DetectedPage, Extraction, Segment
 from .paper import PageSetup
-from .sources import PageSource, PdfSource, open_source, parse_pages
+from .sources import PageSource, open_source, parse_pages
 
 Progress = Callable[[str], None]
 

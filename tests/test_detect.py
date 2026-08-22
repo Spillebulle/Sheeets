@@ -1,12 +1,7 @@
 import numpy as np
 import pytest
 
-from sheeets.detect.projection import (
-    ProjectionDetector,
-    binarise,
-    horizontal_runs,
-    otsu,
-)
+from sheeets.detect.projection import ProjectionDetector, horizontal_runs, otsu
 from sheeets.model import PageImage
 from tests.conftest import SPACE, STAVES
 

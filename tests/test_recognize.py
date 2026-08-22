@@ -1,7 +1,5 @@
 """The recognition seam: no engine ships, but the wiring is real and tested."""
 
-from pathlib import Path
-
 import pytest
 
 from sheeets import extract_part

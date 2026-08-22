@@ -335,7 +335,7 @@ def retype(
         engine=recognizer.name,
         musicxml=musicxml,
         fresh_pdf=engraved.pdf,
-        draft_pdf=draft if keep else draft,
+        draft_pdf=draft,
         bars_in_scan=bars,
         measures_read=measures,
         checks=checks,

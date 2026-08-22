@@ -3,7 +3,7 @@
 import numpy as np
 from PIL import Image, ImageDraw
 
-from sheeets.crop import band_for, grow, ink_strip, longest_run
+from sheeets.crop import band_for, longest_run
 from sheeets.detect.projection import ProjectionDetector
 from sheeets.model import PageImage
 

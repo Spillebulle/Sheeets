@@ -9,7 +9,7 @@ a promise that one exists.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from ..model import Extraction
 
