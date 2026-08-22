@@ -62,6 +62,13 @@ those two would have shown, and none of them were in the recognition:
   into. Both errors name LilyPond's internals rather than the bar, and one of
   them leaves a `.ly` truncated mid-measure so the *next* error is a syntax
   error hundreds of lines later. See NOTES.md.
+
+  The first fix then *appeared* to work and had not: the naming pass ran
+  before the bar filler, and the filler pads a short bar with a rest of
+  exactly the length that is missing — with no written value. Fifteen of them
+  went into the file the engraver reads, and the case still produced no PDF.
+  It looked fixed because it had been tested against a file an earlier run had
+  left lying around. Test the artefact the run produces.
 - **A part with no printed bar numbers still offered five digit-shaped
   readings**, and the run chosen from them said a 77-measure part was twelve
   bars long. That number would have been used as the authority to "repair" the
