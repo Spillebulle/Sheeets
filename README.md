@@ -44,7 +44,7 @@ pip install -e .[dev]     # and pytest
 | `-1`, `-2`, `17` | by position; negative counts from the bottom, as in Python |
 | `17..18` | a run of staves, for a part printed on two |
 | `all` | every staff — which is how an already-extracted part passes through |
-| `name:Perc` | match the printed instrument label (needs OCR; see below) |
+| `name:Perc` | match the printed instrument label (needs `tesseract` on PATH) |
 
 The reliable way to find the index is to look:
 
@@ -56,6 +56,15 @@ writes the page with every staff boxed and numbered from the top *and* from the
 bottom, so you can read the number off the instrument you want. `--labels out/`
 writes the label column beside each staff as its own small image, which is the
 same answer without OCR.
+
+`name:` reads the labels instead, and it is tolerant: on the score this was
+built against the nineteen names come back carrying the staff's own bracket and
+the odd stray tick — `". Timpani ["`, `"_y Eb Bass -~"` — and the comparison is
+on letters alone, so `name:Timpani`, `name:Euphonium` and `name:Percussion` all
+land on the right staff. The staff that matched is remembered, so a score that
+prints its names on the first page only still works, and a 27-page score costs
+nineteen OCR calls rather than five hundred. It is still a convenience: check
+it with `--overlay` before trusting a part to it.
 
 ## Output
 
@@ -311,7 +320,6 @@ against, and it comes out at five times the error rate.
 - Any other score. One publisher, one engraver, one scanner.
 - Handwritten or very old engraving; pages with a curl rather than a tilt (the
   deskew is one angle for the whole page).
-- `name:` selection, which needs OCR that is not installed here.
 - The retype on anything but those two parts. Detection is good on all ten
   fleet cases; recognition has been measured on two.
 - Rehearsal marks on a part rather than a score. On the one part tried, none
