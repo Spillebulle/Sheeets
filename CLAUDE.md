@@ -55,6 +55,20 @@ Stages are independent and registered, and that is worth protecting:
   engraver dead. It must never change which notes are played, and every repair
   it makes is reported.
 
+## The fleet
+
+`FLEET.md` describes a set of real scans the pipeline is run over — a bound
+score, a clean part, a photocopy, a crooked scan, a photograph, a
+born-digital part, stacked parts, manuscript, a book of parts. **The music is
+copyright and is never committed**; the manifest and the PDFs live outside the
+repository and `tools/fleet.py` is pointed at them.
+
+Run it before and after any change to `detect/`, `layout.py`, `crop.py` or
+`reflow.py`. Six real faults came out of it that no synthetic page showed, and
+they are listed in NOTES.md. A change that improves one case and quietly ruins
+another is the normal failure mode here, and the fleet's change column is the
+only thing that catches it.
+
 ## Things that will look like shortcuts and are not
 
 - Rendering below 300 dpi because it is faster. At 150 dpi this score loses a
@@ -64,7 +78,12 @@ Stages are independent and registered, and that is worth protecting:
   (`area / width`); a tilted line has a tall box.
 - Cutting a system anywhere but at a barline.
 - Committing a score. They are copyrighted and they are megabytes; the tests
-  draw their own pages with `tools/make_fixture.py`.
+  draw their own pages with `tools/make_fixture.py` and the fleet keeps its
+  music outside the repository (`FLEET.md`).
+- Judging a detector change on the synthetic fixtures alone. They are upright,
+  evenly printed and complete, which is exactly what real paper is not.
+- Stopping at the first binarisation that "looks reasonable". Eleven evenly
+  spaced staves look perfectly healthy on a page that has thirteen.
 
 ## Commands
 

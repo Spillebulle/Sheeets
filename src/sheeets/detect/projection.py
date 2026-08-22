@@ -387,22 +387,20 @@ class ProjectionDetector:
     def detect(self, page: PageImage) -> DetectedPage:
         """Find the staves, trying more than one idea of what counts as ink.
 
-        Every strategy is tried and the one that finds the most staves wins,
-        ties going to the page that looks most regular.  Stopping early at the
-        first "reasonable" answer was tried and is wrong: on the crooked part
-        the plain threshold finds eleven evenly spaced staves and looks
-        entirely healthy — but the page has thirteen, and the two it drops are
-        the ones printed in lighter ink.  Evenly spaced is not the same as
-        complete, and nothing cheap tells them apart.
-
-        The cost is four passes over the page instead of one.  That is a few
-        seconds each, paid once per part, against silently losing two systems.
+        Strategies are tried in turn and the best answer wins — most staves,
+        ties to the most regular page.  The search stops early only when the
+        answer looks *complete*, which is a stricter question than whether it
+        looks reasonable: on the crooked part the plain threshold finds eleven
+        evenly spaced staves and looks entirely healthy, but the page has
+        thirteen and the two it drops are the ones printed in lighter ink.
+        Evenly spaced is not the same as complete — what tells them apart is
+        whether the staves account for the ink that is on the page.
         """
         attempts: list[tuple[int, bool, DetectedPage, str]] = []
         for name, ink in ink_strategies(self.threshold):
             result = self._detect_with(page, ink, name)
             attempts.append((len(result.staves), _looks_regular(result), result, name))
-            if not self.try_harder:
+            if not self.try_harder or _looks_complete(result, page.array):
                 break
         if not attempts:  # pragma: no cover - ink_strategies is never empty
             return DetectedPage(page=page, image=page.array, systems=[], space=0.0,
@@ -445,6 +443,27 @@ class ProjectionDetector:
             skew_deg=skew,
             notes={"line_candidates": len(cands), "merged_lines": len(merged)},
         )
+
+
+def _looks_complete(result: DetectedPage, original: np.ndarray,
+                    coverage: float = 0.8) -> bool:
+    """Do the staves account for the ink on the page?
+
+    The cheap test for "no need to try another way of reading this".  Staves
+    can be evenly spaced and still be missing two systems; what gives that away
+    is a stretch of the page with ink on it and no staff in it.
+    """
+    staves = result.staves
+    if len(staves) < 3 or not _looks_regular(result):
+        return False
+    ink_rows = np.nonzero((original < 160).mean(axis=1) > 0.02)[0]
+    if ink_rows.size < 10:
+        return False
+    extent = float(ink_rows[-1] - ink_rows[0])
+    if extent <= 0:
+        return False
+    span = max(s.bottom for s in staves) - min(s.top for s in staves)
+    return bool(span >= coverage * extent)
 
 
 def _looks_regular(result: DetectedPage, tolerance: float = 0.25) -> bool:
