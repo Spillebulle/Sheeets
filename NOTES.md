@@ -255,6 +255,75 @@ Both are reported per score page, so a suspect measure comes with the page it
 came from. That is the difference between "measure 147 is wrong" and a fix that
 takes ten seconds.
 
+## What real paper does that drawn pages do not
+
+Everything above was learned from one score. The test fleet (see `FLEET.md`)
+added nine more sources — a clean published part, a photocopy with pencil on
+it, a crooked scan, a photograph of an old part on a table, a born-digital
+drum-kit part, three players stacked on a page, hand-copied manuscript, and a
+32-page book holding every part in turn — and each one broke something.
+
+**A staff line is often not found in one piece.** Where print has faded, one
+line comes back as five or six fragments of a tenth of the page each. The
+width test was applied to fragments, so the line vanished; it is now applied
+to the line *after* its pieces are put back together. That recovered two
+systems at the top of the crooked part and a whole page of the clean one.
+
+**Staff spacing cannot be measured from the gaps between detected lines.** On
+the photograph the print has spread and every line is found twice, four pixels
+apart, so half the gaps are 4 px and the estimate halves — the comb then hunts
+for five lines 8 px apart and finds *no staff at all on the page*. Measured
+from the ink instead: the commonest vertical run of ink is the line thickness,
+the commonest run of white is the gap between lines, and the distance from one
+line to the next is the two added together. That page went from 0 to 7 systems.
+
+| | thickness | white gap | space |
+|---|---|---|---|
+| bound score | 2 | 9 | 11 |
+| clean part | 2 | 16 | 18 |
+| photocopy | 4 | 10 | 14 |
+| crooked scan | 3 | 14 | 17 |
+| photograph | 6 | 15 | 21 |
+
+**Lines wobble and go missing.** One staff of the clean part had its lines
+detected 18, 15, 21, 17 apart where the spacing is 18. Four lines now claim a
+staff and the fifth is computed from a least-squares fit, with the fit itself
+as the check that the four belong together.
+
+**Music is on a grid, so a hole in the grid is evidence.** A gap of exactly two
+staves' spacing in an otherwise even column is a staff that was not found, and
+knowing *where* to look makes it safe to look with weaker evidence — three
+lines instead of four. That recovers the glockenspiel staff on the
+three-player page, whose middle lines are buried under beamed semiquavers.
+
+**One threshold does not fit one page, let alone all of them.** The crooked
+part's first three systems are printed in lighter ink than the rest (ink
+minimum 97 against 0 further down); a level that keeps them drowns the dense
+systems below. Four ways of deciding what is ink are tried and the one finding
+the most staves wins — but only after a fast path that asks whether the staves
+already found *account for the ink on the page*, because eleven evenly spaced
+staves look perfectly healthy on a page that has thirteen.
+
+**What makes staves a system is a barline through them.** Four versions of this
+test were wrong, each in a way only one case exposed:
+
+| test | broken by |
+|---|---|
+| the gap between staves is much bigger than usual | a part, where every gap is the same size: eight systems read as one |
+| ink joining them at the left edge | a staff line detected short: a 19-stave system split in two |
+| ink joining them anywhere in the gap | manuscript, where a stray stroke joins two systems |
+| ink running the full height through both staves | the scan's dark left border, 65 columns of it, running the height of the page and joining everything |
+
+The last one plus "inside the music, not in the page's margin" is correct on
+all ten cases.
+
+**A part's first page carries the title.** That is how a book of twenty parts
+is cut into twenty files. The page margin is no help — across the book the
+first staff sits between 9 % and 26 % down the page whether or not the part
+changes. The title is found as the longest run of letters recurring across the
+headers, compared letters-only so that "RULE BRITANNIA." and "RULE B RITANNIA”"
+are the same thirteen characters.
+
 ## Still open
 
 - Multi-system pages. `layout.group_systems` is written and unit tested against
@@ -285,3 +354,9 @@ takes ten seconds.
   bar-count cross-check is there to reveal.
 - **Whether feeding the engine a bigger staff helps.** The draft is rendered at
   `--omr-staff-mm 2.2` and `--omr-dpi 400`; neither number has been varied.
+- **Retyping anything but the two parts from the bound score.** Detection is
+  now good on all ten fleet cases; recognition has only been measured on two.
+  The fleet runs `--retype` on everything, and nobody has done it yet.
+- **The last page of the book of parts.** Its header reads "cm RULE BRITANNIA”
+  — nearmmans", with no legible player, so it is called "part 20". It may be a
+  second percussion page rather than a part of its own.
