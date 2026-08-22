@@ -3,6 +3,8 @@
     sheeets inspect score.pdf --pages 3-               # what is on the pages
     sheeets inspect score.pdf --pages 3 --overlay out/ # numbered staves, to look at
     sheeets extract score.pdf --part bottom --pages 3- -o percussion.pdf
+    sheeets retype  score.pdf --part bottom --pages 3- -o fresh.pdf
+    sheeets engines                                    # what can read music here
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from pathlib import Path
 from . import __version__
 from .paper import PAGE_SIZES_MM, PageSetup
 from .pipeline import analyse, extract_part
+from .retype import retype
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -56,15 +59,47 @@ def build_parser() -> argparse.ArgumentParser:
     ext.add_argument("--show-sources", action="store_true",
                      help="print the source page number beside each system")
     ext.add_argument("--quiet", action="store_true")
+
+    ret = subs.add_parser("retype", parents=[common],
+                          help="read the part with an OMR engine and set it again, fresh")
+    ret.add_argument("--part", default="bottom", help="which staff, as for extract")
+    ret.add_argument("-o", "--out", required=True, help="the freshly engraved PDF")
+    ret.add_argument("--engine", default=None,
+                     help="oemer | audiveris | external (default: the first installed)")
+    ret.add_argument("--name", default="", help="what to call the part")
+    ret.add_argument("--title", default="", help="heading on the first page")
+    ret.add_argument("--staff-size", type=float, default=20.0,
+                     help="LilyPond staff size for the fresh engraving")
+    ret.add_argument("--page", default="a4", choices=sorted(PAGE_SIZES_MM))
+    ret.add_argument("--landscape", action="store_true")
+    ret.add_argument("--omr-dpi", type=float, default=400.0,
+                     help="resolution the engine is fed at")
+    ret.add_argument("--omr-staff-mm", type=float, default=2.2,
+                     help="staff size of the draft the engine reads")
+    ret.add_argument("--workdir", default=None,
+                     help="keep the draft, page images and per-page MusicXML here")
+    ret.add_argument("--read-from", default="score", choices=["score", "part"],
+                     help="give the engine the original score pages (default) or the "
+                          "extracted part; the score reads better, see NOTES.md")
+    ret.add_argument("--reuse", action="store_true",
+                     help="keep the MusicXML already in --workdir instead of reading again")
+    ret.add_argument("--report", metavar="FILE.json",
+                     help="write the proofreading report (page by page) as JSON")
+    ret.add_argument("--quiet", action="store_true")
+
+    subs.add_parser("engines", help="list the OMR engines and the engraver found here")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "engines":
+        return _engines()
     dpi = args.dpi if args.dpi == "auto" else float(args.dpi)
-
     if args.command == "inspect":
         return _inspect(args, dpi)
+    if args.command == "retype":
+        return _retype(args, dpi)
     return _extract(args, dpi)
 
 
@@ -108,6 +143,67 @@ def _extract(args, dpi) -> int:
     pages = len(extraction.pages_used)
     print(f"{extraction.part_name}: {pieces} piece(s) from {pages} page(s) -> {args.out}")
     return 0 if pieces else 1
+
+
+def _retype(args, dpi) -> int:
+    progress = None if args.quiet else (lambda line: print(f"  {line}", file=sys.stderr))
+    result = retype(
+        args.score, part=args.part, out=args.out, pages=args.pages, dpi=dpi,
+        engine=args.engine, omr_dpi=args.omr_dpi, omr_staff_mm=args.omr_staff_mm,
+        staff_size=args.staff_size, paper=args.page, landscape=args.landscape,
+        part_name=args.name, title=args.title, read_from=args.read_from,
+        workdir=args.workdir,
+        keep=bool(args.workdir), reuse=args.reuse, progress=progress,
+    )
+    for warning in result.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    print(result.summary())
+    print(f"  fresh engraving: {result.fresh_pdf}")
+    print(f"  musicxml:        {result.musicxml}")
+
+    if result.spans:
+        print("  score page -> measures (bars seen in the scan / measures read):")
+        for span in result.spans:
+            seen = result.bars_by_page.get(span.source_page)
+            suspect = sum(1 for c in result.bad_measures
+                          if span.first_measure <= c.number <= span.last_measure)
+            flag = f"  {suspect} suspect" if suspect else ""
+            print(f"    p{span.source_page:<4} {span.first_measure:>4}-{span.last_measure:<4} "
+                  f"({seen} / {span.measures}){flag}")
+
+    bad = result.bad_measures
+    if bad:
+        shown = ", ".join(
+            f"{c.number}(p{result.page_of(c.number)})" for c in bad[:15]
+        )
+        more = f" (+{len(bad) - 15} more)" if len(bad) > 15 else ""
+        print(f"  measures to proofread: {shown}{more}")
+    if args.report:
+        import json
+
+        Path(args.report).write_text(json.dumps(result.report(), indent=2))
+        print(f"  report:          {args.report}")
+    if not result.trustworthy:
+        print("  read it against the scan before playing from it")
+    return 0
+
+
+def _engines() -> int:
+    from .engrave import LilyPondEngraver
+    from .recognize import _REGISTRY
+
+    print("optical music recognition:")
+    for name in sorted(_REGISTRY):
+        engine = _REGISTRY[name]
+        mark = "yes" if engine.available() else "no "
+        print(f"  [{mark}] {name}")
+    engraver = LilyPondEngraver()
+    print("engraver:")
+    print(f"  [{'yes' if engraver.available() else 'no '}] lilypond "
+          f"{engraver.version()}")
+    if not engraver.available():
+        print("      needed by `retype`; install lilypond (it brings musicxml2ly)")
+    return 0
 
 
 def _write_overlays(detected, folder: Path) -> int:

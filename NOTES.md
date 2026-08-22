@@ -161,6 +161,74 @@ same music. That is the strongest evidence so far that the selector picks the
 staff a person means, and it is one piece of music — not a guarantee about any
 other score.
 
+## Retyping, and what an OMR engine actually does with this
+
+Cropping a scan is geometry and can be checked by looking. Retyping means a
+machine reads the music, and it gets things wrong in ways that look right, so
+everything here is a measurement rather than an impression.
+
+**The engine matters more than anything else in the chain.** Both were given
+the same page — one page of the extracted percussion part, 400 dpi:
+
+| | oemer 0.1.8 | Audiveris 5.6.3 |
+|---|---|---|
+| staff | a piano grand staff, invented | one staff, correct |
+| clef | treble, invented | **percussion**, correct |
+| multi-bar rests | lost | kept |
+| measures found on the page | 27 | 36 |
+| measures that add up | 1 of 27 | 16 of 36 |
+
+oemer is an end-to-end neural model trained on piano scores and it returns a
+piano score whatever it is shown. It is a pip install and it will run anywhere,
+which is its whole appeal. For a part that is not a piano part it is not usable.
+
+**What to feed it matters nearly as much.** Two ways of using the same engine on
+the same music, over all 27 pages:
+
+| | reading the extracted part | reading the score pages |
+|---|---|---|
+| what the engine sees | lines that are *pieces* of systems, most starting mid-phrase with no clef | complete systems, nineteen staves, every clef in place |
+| measures found | 192 | (see the run) |
+| per page | wildly uneven: 1, 7, 9, 30, 34, 42, 4, 5, 2 … | — |
+
+Audiveris reported "19 parts along 1 system" on a raw score page — exactly the
+19 staves the detector finds — and the wanted part is then chosen out of its
+answer *by staff position*. Choosing by part index would be wrong the moment a
+piano or a harp takes two staves, which is why `score_xml.staff_spans` counts
+staves and not parts.
+
+**Three ways machine-written MusicXML kills an engraver.** All three were hit on
+the first real run, all three are repaired by `score_xml.sanitize`, and each one
+is reported so nobody thinks the output is untouched:
+
+1. `<divisions>0</divisions>`. Meaningless, and fatal twice: the validator
+   divides by it, and so does musicxml2ly, which dies with a ZeroDivisionError
+   inside LilyPond's own `musicxml.py`. Replaced with whatever the rest of the
+   document uses.
+2. A tuplet that stops without starting. musicxml2ly's `group_tuplets` compares
+   an index against `None` and raises a TypeError. The unmatched notation is
+   dropped.
+3. A note with neither `<type>` nor a positive `<duration>`. LilyPond's error
+   path for exactly this case references an undefined variable and raises a
+   NameError, so the message it was trying to print never appears. The note is
+   dropped, and which bar lost it is reported.
+
+**Checking the result without a human.** Two arithmetic tests catch most of what
+OMR gets wrong:
+
+- **Every measure against its own time signature.** A measure whose notes do not
+  add up is wrong whatever it looks like. A whole-bar or multi-bar rest
+  (`<rest measure="yes"/>`) counts as exactly one bar however its duration is
+  written, or every multi-rest reads as an error.
+- **Bars in the scan against measures read.** The barline positions were already
+  found in order to cut the systems, so the number of written bars in the source
+  is known *before* recognition. Nothing inside the MusicXML can reveal a bar
+  the engine never saw; this can, and did: 192 measures against 400 bars.
+
+Both are reported per score page, so a suspect measure comes with the page it
+came from. That is the difference between "measure 147 is wrong" and a fix that
+takes ten seconds.
+
 ## Still open
 
 - Multi-system pages. `layout.group_systems` is written and unit tested against
@@ -171,5 +239,11 @@ other score.
 - OCR labels. `name:` works through `pytesseract` if it is installed; it has
   never been run here, and the labels on a score are 2 mm high and abbreviated,
   so treat it as a convenience and check with `inspect --overlay`.
-- MusicXML. The seam exists and is tested with a stand-in program; no real OMR
-  engine has been run through it.
+- **How good a retype can get.** Audiveris reads this percussion part as a
+  draft, not as a finished part: a third of its measures do not add up, and it
+  invents the odd clef change. Percussion is the hard case — two voices, X
+  noteheads, no pitch to check against — and a pitched part should do better.
+  Nobody has measured that yet: run `retype --part -2` on the Timpani and put
+  the numbers here.
+- **Whether feeding the engine a bigger staff helps.** The draft is rendered at
+  `--omr-staff-mm 2.2` and `--omr-dpi 400`; neither number has been varied.

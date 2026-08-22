@@ -70,8 +70,63 @@ The suffix of `--out` decides the format:
   made, in pixels plus the dpi to turn them into millimetres. This is the seam
   for anything that wants to edit or re-run the layout.
 - **`.musicxml`** — needs an optical music recognition engine, which Sheeets does
-  not include. See "Editable output" below; without one it fails with a sentence
-  saying so rather than writing an empty file.
+  not include. See "Retyping" below; without one it fails with a sentence saying
+  so rather than writing an empty file.
+
+## Retyping: fresh files rather than a cropped scan
+
+`extract` gives you the scan, cut up and enlarged. `retype` gives you *new*
+sheet music: the part is read by an optical music recognition engine and set
+again by LilyPond, so the output is clean vector notation with no scanner grain,
+and a MusicXML file you can open in MuseScore, Sibelius or Dorico and edit.
+
+```console
+$ sheeets engines
+optical music recognition:
+  [yes] audiveris
+  [no ] external
+  [yes] oemer
+engraver:
+  [yes] lilypond GNU LilyPond 2.24.3
+
+$ sheeets retype score.pdf --part bottom --pages 3- -o fresh.pdf \
+      --name "Optional Percussion" --workdir work/ --report proof.json
+```
+
+**Read the report before you play from it.** Recognition is the one part of this
+that guesses, and it guesses plausibly, so the run checks itself two ways and
+tells you where to look:
+
+- every measure is added up against its own time signature — one that does not
+  add up is wrong, no argument;
+- the number of bars the *scan* holds is counted from the barlines found during
+  extraction, before any recognition happens, and compared with the number of
+  measures that came back.
+
+```
+Optional Percussion: 192 measures read by audiveris, 400 bars counted in the
+scan, 64 measure(s) that do not add up — needs proofreading
+  score page -> measures (bars seen in the scan / measures read):
+    p3      1-13   (12 / 13)
+    p4     14-29   (16 / 16)  2 suspect
+  measures to proofread: 1(p3), 4(p3), 19(p4) …
+```
+
+So a flagged bar is never just a number: it comes with the page of the score it
+came from, which is what makes fixing it quick.
+
+**Which engine, and what to feed it.** Two are wired up: `oemer` (pip install,
+neural, quick to set up) and `audiveris` (Java, has to be built, much better).
+Neither ships with Sheeets. By default the engine is handed **the original score
+pages** and the wanted part is picked out of its answer by staff position —
+Audiveris reads a nineteen-stave system as nineteen parts, and each keeps its
+own clef. `--read-from part` hands it the extracted part instead, which sounds
+simpler and reads worse: the draft's lines are pieces of systems, so most begin
+mid-phrase with no clef.
+
+`--workdir` keeps the page images and the per-page MusicXML; `--reuse` then
+skips recognition and re-does only the joining, checking and engraving, which
+turns a repeat run from an hour into seconds.
 
 ## How it works
 
@@ -86,6 +141,14 @@ Six stages, each replaceable, wired together in `pipeline.py`:
 | crop | `crop.py` | staff + neighbours → a band on the page |
 | reflow | `reflow.py` | band + barlines → pieces that fit the paper |
 | write | `export/` | `Exporter` → PDF, images, JSON, MusicXML |
+
+and, for retyping, three more:
+
+| stage | module | contract |
+|---|---|---|
+| recognise | `recognize/` | `Recognizer` → MusicXML per page |
+| join and check | `score_xml.py` | merge, repair, add up every bar |
+| engrave | `engrave.py` | MusicXML → a fresh PDF, via LilyPond |
 
 The detector works on the ink: keep pixels that sit in a long horizontal run,
 label what survives, keep the components that are wide and thin, fit a line to
@@ -104,18 +167,17 @@ Nothing in the pipeline knows about the others' internals, so:
 - **a single part as input** — `--part all` treats every staff on the page as
   the part, so a part PDF passes straight through to the exporters (or to a
   recogniser).
-- **editable output** — `recognize/` is the seam. A `Recognizer` takes the
-  extraction and returns MusicXML; `ExternalRecognizer` runs an OMR program you
-  already have:
+- **another OMR engine** — implement `recognize_page(image, out_dir) -> Path`
+  and `recognize.register("mine", MyEngine())`. Anything that reads a folder of
+  images and writes MusicXML needs no code at all:
 
   ```console
-  export SHEEETS_OMR_COMMAND="audiveris -batch -export -output {output} {input}"
-  sheeets extract score.pdf --part bottom -o part.musicxml
+  export SHEEETS_OMR_COMMAND="my-omr --in {input} --out {output}"
+  sheeets retype score.pdf --part bottom -o fresh.pdf --engine external
   ```
 
-  `{input}` is a folder of PNGs in playing order and `{output}` is where the
-  program should write MusicXML. No engine ships with Sheeets and none is
-  written; this is a place to plug one in, not a claim that it works.
+  The two engines that are wired up are found the same way, by environment
+  variable: `SHEEETS_AUDIVERIS` and `SHEEETS_OEMER`.
 
 ## What is verified, and what is not
 

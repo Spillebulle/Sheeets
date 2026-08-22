@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 
 from ..model import Extraction
-from ..recognize import get_recognizer
+from ..recognize import get_recognizer, recognize_extraction
 from . import register
 
 
@@ -28,7 +28,7 @@ class MusicXmlExporter:
                 "MusicXML."
             )
         with tempfile.TemporaryDirectory(prefix="sheeets-omr-") as tmp:
-            xml = engine.recognize(extraction, Path(tmp))
+            xml = recognize_extraction(engine, extraction, Path(tmp))
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(xml, encoding="utf-8")

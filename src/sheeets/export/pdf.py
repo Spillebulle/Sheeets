@@ -26,6 +26,7 @@ class PdfExporter:
         title: str = "",
         subtitle: str = "",
         show_sources: bool = False,
+        heading: bool = True,
         **_,
     ) -> Path:
         import pymupdf
@@ -45,13 +46,13 @@ class PdfExporter:
             nonlocal page, cursor
             page = doc.new_page(width=page_w, height=page_h)
             cursor = margin
-            if first and (title or extraction.part_name):
+            if first and heading and (title or extraction.part_name):
                 cursor = _draw_heading(
                     page, margin, cursor, usable_w,
                     title or extraction.source,
                     subtitle or extraction.part_name,
                 )
-            else:
+            elif heading:
                 page.insert_text(
                     (page_w - margin, margin - 4),
                     f"{extraction.part_name}   {doc.page_count}",

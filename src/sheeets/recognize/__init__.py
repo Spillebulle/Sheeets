@@ -1,14 +1,14 @@
-"""Turning pixels into notes — the part that is deliberately not written yet.
+"""Turning pixels back into notes.
 
-Optical music recognition is its own project, and pretending otherwise would put
-a lie in the ledger.  What lives here is the seam: a `Recognizer` takes the
-segments a run produced and returns MusicXML.  Nothing in the pipeline calls one
-unless asked, and if nobody has registered one, the MusicXML exporter says so in
-a sentence instead of writing an empty file.
+Sheeets does not contain an optical music recognition engine and is not going to
+grow one: OMR is its own field, and the good implementations are years of work.
+What lives here is the seam — how an engine is called, and what shape its answer
+has to be in — plus drivers for two that exist (`engines.py`).
 
-`ExternalRecognizer` covers the realistic case — an OMR program (Audiveris,
-oemer, PhotoScore) that reads images and writes MusicXML — by running it as a
-subprocess.  Point it at the command and it works; there is no bundled engine.
+A recogniser is handed **one page image at a time** and returns the path to the
+MusicXML it wrote.  Pages are joined afterwards by `score_xml.merge`, which
+keeps the engines simple: none of them has to know that a part runs over ten
+pages.
 """
 
 from __future__ import annotations
@@ -16,9 +16,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
-from typing import Callable, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from ..model import Extraction
 
@@ -30,8 +29,8 @@ class Recognizer(Protocol):
 
     def available(self) -> bool: ...
 
-    def recognize(self, extraction: Extraction, workdir: Path) -> str:
-        """Return MusicXML for the extracted part."""
+    def recognize_page(self, image: Path, out_dir: Path) -> Path:
+        """Read one page image; return the path of the MusicXML written."""
 
 
 _REGISTRY: dict[str, Recognizer] = {}
@@ -43,23 +42,27 @@ def register(name: str, recognizer: Recognizer) -> None:
 
 def get_recognizer(name: str | None = None) -> Recognizer | None:
     if name:
-        return _REGISTRY.get(name)
-    for rec in _REGISTRY.values():
-        if rec.available():
-            return rec
+        engine = _REGISTRY.get(name)
+        return engine if engine is not None and engine.available() else None
+    for engine in _REGISTRY.values():
+        if engine.available():
+            return engine
     return None
 
 
 def available() -> list[str]:
-    return sorted(n for n, r in _REGISTRY.items() if r.available())
+    return sorted(name for name, engine in _REGISTRY.items() if engine.available())
+
+
+def registered() -> list[str]:
+    return sorted(_REGISTRY)
 
 
 class ExternalRecognizer:
-    """Run an OMR program over the extracted images.
+    """Any program that reads images from one folder and writes MusicXML to another.
 
-    The command is a template with two placeholders: `{input}` is a folder of
-    PNGs, one per piece, in playing order, and `{output}` is a folder the tool
-    should write MusicXML into.  Set it with SHEEETS_OMR_COMMAND, e.g.
+    The command is a template with two placeholders, `{input}` and `{output}`.
+    Set it with SHEEETS_OMR_COMMAND, e.g.
 
         SHEEETS_OMR_COMMAND="audiveris -batch -export -output {output} {input}"
     """
@@ -84,32 +87,49 @@ class ExternalRecognizer:
             return False
         return shutil.which(self.command.split()[0]) is not None
 
-    def recognize(self, extraction: Extraction, workdir: Path) -> str:
+    def recognize_page(self, image: Path, out_dir: Path, timeout: int = 1800) -> Path:
         if not self.available():
             raise RuntimeError(
                 "no OMR program configured; set SHEEETS_OMR_COMMAND to something "
                 "that reads images from {input} and writes MusicXML to {output}"
             )
-        from ..export.images import ImageExporter
-
-        workdir = Path(workdir)
-        in_dir = workdir / "input"
-        out_dir = workdir / "output"
+        image = Path(image)
+        out_dir = Path(out_dir)
+        in_dir = out_dir / f"{image.stem}-in"
         in_dir.mkdir(parents=True, exist_ok=True)
         out_dir.mkdir(parents=True, exist_ok=True)
-        ImageExporter().write(extraction, in_dir)
-
+        shutil.copy(image, in_dir / image.name)
         command = self.command.format(input=str(in_dir), output=str(out_dir))
-        subprocess.run(command, shell=True, check=True)
-
+        subprocess.run(command, shell=True, check=True, timeout=timeout)
         produced = sorted(
             p for p in out_dir.rglob("*") if p.suffix.lower() in {".xml", ".musicxml"}
         )
         if not produced:
             raise RuntimeError(f"{command!r} wrote no MusicXML into {out_dir}")
-        return produced[0].read_text(encoding="utf-8")
+        return produced[0]
+
+
+def recognize_extraction(engine: Recognizer, extraction: Extraction, workdir: Path) -> str:
+    """Read every piece of an extraction and return one merged MusicXML document."""
+    from ..export.images import ImageExporter
+    from ..score_xml import merge
+
+    workdir = Path(workdir)
+    images = workdir / "images"
+    ImageExporter().write(extraction, images)
+    pages = sorted(images.glob("*.png"))
+    produced = [engine.recognize_page(page, workdir / "xml") for page in pages]
+    tree = merge(produced, part_name=extraction.part_name)
+    from xml.etree import ElementTree as ET
+
+    return ET.tostring(tree.getroot(), encoding="unicode")
 
 
 register("external", ExternalRecognizer())
 
-__all__ = ["Recognizer", "ExternalRecognizer", "register", "get_recognizer", "available"]
+from . import engines  # noqa: E402,F401  (registers oemer and audiveris)
+
+__all__ = [
+    "Recognizer", "ExternalRecognizer", "register", "get_recognizer",
+    "available", "registered", "recognize_extraction",
+]

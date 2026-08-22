@@ -23,6 +23,21 @@ are quiet — a wrong number of staves, not an exception. So:
   been through it. The README's "verified / not verified" split is load-bearing;
   keep it honest.
 
+## Two halves, and the difference between them
+
+`extract` is geometry: it cuts the right staff out of the scan. It can be
+checked by looking, and it is verified against a real score.
+
+`retype` is recognition: an OMR engine reads the music and LilyPond sets it
+again. It **guesses**, and it guesses plausibly. Everything in that half is
+built around not trusting it: every measure is added up against its time
+signature, the bars in the scan are counted before recognition happens so a
+missing bar can be seen at all, and the result carries a `trustworthy` flag and
+a page-by-page report rather than prose.
+
+Never soften that. If a change makes the retype path look more confident than
+its numbers justify, it is the wrong change.
+
 ## Shape
 
 Stages are independent and registered, and that is worth protecting:
@@ -33,8 +48,12 @@ Stages are independent and registered, and that is worth protecting:
   is; `export/` must not know how staves were found.
 - New detector, exporter or recogniser: implement the protocol and `register()`.
   No `if` in the pipeline.
-- `recognize/` is a seam, not a feature. There is no OMR engine here and writing
-  half of one would be worse than none.
+- `recognize/` is a seam, not a feature. No OMR engine ships here; two are
+  driven as external programs (`recognize/engines.py`) and found by environment
+  variable. Writing half an engine would be worse than none.
+- `score_xml.sanitize` may only make *structural* repairs — things that stop an
+  engraver dead. It must never change which notes are played, and every repair
+  it makes is reported.
 
 ## Things that will look like shortcuts and are not
 
@@ -51,7 +70,15 @@ Stages are independent and registered, and that is worth protecting:
 
 ```console
 pip install -e .[dev]
-python -m pytest                                   # 34 tests, no score needed
+python -m pytest                                    # 62 tests, no score needed
+sheeets engines                                     # what is installed here
 sheeets inspect score.pdf --pages 3- --overlay out/ # what is on the page
 sheeets extract score.pdf --part bottom -o part.pdf
+sheeets retype  score.pdf --part bottom -o fresh.pdf --workdir work/ --reuse
 ```
+
+`retype` needs two outside programs, neither bundled: an OMR engine (Audiveris
+5.6.3 is much the better of the two wired up; it needs Java 21, and master
+needs Java 25, so build the tag) and LilyPond for the engraving. Always pass
+`--workdir` and `--reuse` while working on the joining, checking or engraving
+stages — recognition is the slow part and re-doing it wastes an hour.
