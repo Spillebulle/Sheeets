@@ -149,3 +149,33 @@ def test_the_whole_retype_runs_and_reports(score_pdf, tmp_path, monkeypatch):
     assert result.bars_in_scan == 16
     assert not result.trustworthy
     assert result.report()["pages"]
+
+
+def test_the_counts_are_made_to_add_up_to_what_the_page_says():
+    """The printed bar numbers settle the total, so each rest is checked
+    against arithmetic rather than against a second opinion from OCR."""
+    from sheeets.retype import _fit_counts
+
+    # Nothing to do.
+    assert _fit_counts([7, 5], 12) == ([7, 5], "")
+
+    # One unreadable: the sum names it.
+    counts, note = _fit_counts([4, 16, None, 14, 34, 3], 95)
+    assert counts == [4, 16, 24, 14, 34, 3] and "24" in note
+
+    # One misread, and the correction looks like the misreading.
+    counts, note = _fit_counts([44, 16], 20)
+    assert counts == [4, 16] and "44" in note
+
+    # Two unreadable, or a sum that no single change explains: refused.
+    assert _fit_counts([None, None, 3], 30)[0] is None
+    assert _fit_counts([7, 5], 40)[0] is None
+
+
+def test_a_correction_has_to_look_like_the_misreading():
+    from sheeets.retype import _plausible_misread
+
+    assert _plausible_misread("44", "4")       # a digit doubled
+    assert _plausible_misread("2", "27")       # a digit lost
+    assert _plausible_misread("16", "18")      # one digit confused
+    assert not _plausible_misread("3", "97")   # nothing in common

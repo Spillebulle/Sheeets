@@ -200,3 +200,87 @@ def test_a_two_voice_bar_is_not_padded(tmp_path):
     path.write_text(TWO_VOICES)
     tree = score_xml.merge([path])
     assert score_xml.fill_incomplete(tree) == []
+
+
+def _part_with_rests():
+    """A page's worth of MusicXML shaped the way Audiveris writes one: two
+    systems, and a multi-measure rest written out expanded."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.Element("score-partwise")
+    part = ET.SubElement(root, "part")
+    part.set("id", "P1")
+
+    def bar(number, *, new_system=False, rest=0, note=False):
+        measure = ET.SubElement(part, "measure")
+        measure.set("number", str(number))
+        if new_system:
+            printing = ET.SubElement(measure, "print")
+            printing.set("new-system", "yes")
+        attributes = ET.SubElement(measure, "attributes")
+        ET.SubElement(attributes, "divisions").text = "4"
+        time = ET.SubElement(attributes, "time")
+        ET.SubElement(time, "beats").text = "4"
+        ET.SubElement(time, "beat-type").text = "4"
+        if rest:
+            style = ET.SubElement(attributes, "measure-style")
+            ET.SubElement(style, "multiple-rest").text = str(rest)
+        item = ET.SubElement(measure, "note")
+        if note:
+            pitch = ET.SubElement(item, "pitch")
+            ET.SubElement(pitch, "step").text = "C"
+            ET.SubElement(pitch, "octave").text = "4"
+        else:
+            ET.SubElement(item, "rest").set("measure", "yes")
+        ET.SubElement(item, "duration").text = "16"
+        return measure
+
+    bar(1, note=True)
+    bar(2, rest=3)
+    bar(3)
+    bar(4)
+    bar(5, new_system=True, note=True)
+    bar(6, note=True)
+    return ET.ElementTree(root)
+
+
+def test_a_system_is_where_the_scan_broke_the_line():
+    from sheeets.score_xml import systems_of
+
+    assert systems_of(_part_with_rests()) == [(0, 4), (4, 6)]
+
+
+def test_the_printed_bars_are_fewer_than_the_measures():
+    """A three-bar rest is one bar on the page and three in the recognition."""
+    from sheeets.score_xml import written_bars
+
+    tree = _part_with_rests()
+    assert written_bars(tree, (0, 4)) == [(0, None), (1, 3)]
+
+
+def test_lengthening_a_rest_adds_the_bars_behind_it():
+    from sheeets.score_xml import count_measures, set_multi_rest, written_bars
+
+    tree = _part_with_rests()
+    assert set_multi_rest(tree, 1, 13) == 10
+    assert count_measures(tree) == 16
+    assert written_bars(tree, (0, 14)) == [(0, None), (1, 13)]
+
+
+def test_a_rest_the_engine_missed_can_be_put_back():
+    from sheeets.score_xml import count_measures, make_multi_rest, written_bars
+
+    tree = _part_with_rests()
+    # Measure 0 is a note on the page it came from; the page says it is a
+    # five-bar rest, and a rest has no content beyond its length.
+    assert make_multi_rest(tree, 0, 5) == 4
+    assert count_measures(tree) == 10
+    assert written_bars(tree, (0, 8))[0] == (0, 5)
+
+
+def test_bars_that_cannot_be_recovered_are_still_counted():
+    from sheeets.score_xml import count_measures, pad_system
+
+    tree = _part_with_rests()
+    assert pad_system(tree, (4, 6), 3) == 3
+    assert count_measures(tree) == 9
