@@ -94,26 +94,47 @@ $ sheeets retype score.pdf --part bottom --pages 3- -o fresh.pdf \
 ```
 
 **Read the report before you play from it.** Recognition is the one part of this
-that guesses, and it guesses plausibly, so the run checks itself two ways and
-tells you where to look:
+that guesses, and it guesses plausibly, so the run checks itself and tells you
+where to look:
 
 - every measure is added up against its own time signature — one that does not
   add up is wrong, no argument;
-- the number of bars the *scan* holds is counted from the barlines found during
-  extraction, before any recognition happens, and compared with the number of
-  measures that came back.
+- the number of bars the *source* holds is worked out before any recognition
+  happens, and compared with the number of measures that came back.
 
 ```
-Optional Percussion: 192 measures read by audiveris, 400 bars counted in the
-scan, 64 measure(s) that do not add up — needs proofreading
+Optional Percussion: 402 measures read by audiveris, 414 bars counted in the
+scan, 8 measure(s) that do not add up — needs proofreading
   score page -> measures (bars seen in the scan / measures read):
-    p3      1-13   (12 / 13)
-    p4     14-29   (16 / 16)  2 suspect
-  measures to proofread: 1(p3), 4(p3), 19(p4) …
+    p3      1-13   (23 / 13)
+    p16   204-221  (18 / 18)  4 suspect
+  measures to proofread: 211(p16), 218(p16), 219(p16) …
 ```
 
 So a flagged bar is never just a number: it comes with the page of the score it
 came from, which is what makes fixing it quick.
+
+**If the source is a part, it is checked against what it prints about itself.**
+An engraved part numbers the first bar of every system, and puts a count over
+every multi-measure rest. Those two numbers together say exactly how many bars
+each system holds — including the ones hidden inside a rest, which is the thing
+recognition is worst at. Sheeets reads them and makes the recognition agree:
+
+```
+403 bars, from the bar numbers printed on the part (21 of 22 systems carry one)
+  page 1 system 6: one multi-bar rest could not be read; the bar numbers make it 24
+  page 1 system 6: a multi-bar rest read as 4, the page prints 34
+  page 1 system 6: bar 5 is a 24-bar rest on the page and was not read as one — put back
+  page 1 system 1: 3 bar(s) the page has and the recognition does not; put in
+                   as rests so the numbering stays right — proofread them
+```
+
+On a publisher's timpani part of a 401-bar overture that is the difference
+between 255 measures and 402: Audiveris had dropped the tens digit off every
+two-digit rest count, and nothing inside the MusicXML could show it. Every
+change is listed, and where the bars cannot be recovered they still go in as
+rests — a part whose bar numbers do not match the conductor's score is no use
+at a rehearsal, so the numbering is kept and the bad bars are named.
 
 **Installing an engine.** Neither is bundled. Audiveris is much the better of
 the two and takes a build; these are the steps that worked here (Ubuntu 24.04):
@@ -264,16 +285,36 @@ down):
 - The Timpani staff (`--part -2`) extracted and compared bar for bar against the
   publisher's own Timpani part: same clef, same opening, same music.
 
+**Measured, over a fleet of ten real scans** — a bound score, a clean part, two
+photocopies, a crooked scan, a born-digital drum-kit part, three parts stacked
+on one page, a hand-copied manuscript and a 32-page book holding every part in
+turn. Every staff on every page is found, and the book is split into its twenty
+parts by name. The music is copyright and is not in this repository; see
+`FLEET.md`.
+
+**Measured, for the retype** — the same piece read twice, by two routes, from
+two different printings:
+
+| | from the 27-page score | the publisher's 2-page part |
+|---|---|---|
+| measures read | 402 | 402 |
+| that do not add up | 8 (2 %) | 6 (1.5 %) |
+| rehearsal marks recovered | A–O, all fifteen | none readable |
+
+The piece is 401 bars. Two independent readings agreeing to within one measure
+of each other and of the truth is the strongest evidence here — and it is still
+one piece of music.
+
 **Not verified:**
 
 - Any other score. One publisher, one engraver, one scanner.
-- Scores with more than one system per page — the grouping is written and unit
-  tested against fabricated geometry, but no real multi-system page has been
-  through it.
 - Handwritten or very old engraving; pages with a curl rather than a tilt (the
   deskew is one angle for the whole page).
 - `name:` selection, which needs OCR that is not installed here.
-- MusicXML, which needs an engine that does not exist here.
+- The retype on anything but those two parts. Detection is good on all ten
+  fleet cases; recognition has been measured on two.
+- Rehearsal marks on a part rather than a score. On the one part tried, none
+  could be read with confidence, and the app says so instead of inventing them.
 
 ## A note on copyright
 

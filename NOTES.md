@@ -324,6 +324,144 @@ changes. The title is found as the longest run of letters recurring across the
 headers, compared letters-only so that "RULE BRITANNIA." and "RULE B RITANNIA”"
 are the same thirteen characters.
 
+## What a part prints about itself
+
+A score is a machine's problem; a *part* is easier, and the reason is that it
+carries its own answer key. Two things are printed on it that say, exactly,
+how many bars it has and where they are.
+
+**The bar number over each system.** Every system after the first is numbered:
+9, 27, 41, 51. The difference between two of them is precisely how many bars
+lie between, so a part with twenty-two systems comes with twenty-one exact
+statements about its own length. Nothing inside the MusicXML can be checked
+against anything until this is read; afterwards, every system can be.
+
+**The count over each multi-measure rest.** A rest of 34 bars is one bar of
+paper, so the two numbers are needed together.
+
+This mattered because of a failure nothing else could have caught. A
+publisher's timpani part of *Ruslan and Ludmila* — 401 bars, printed plainly
+above the last system as 398 with four bars after it — was recognised as
+**255 measures**, and every measure Audiveris produced was well formed. It had
+simply dropped the tens digit off every two-digit rest count:
+
+| the page prints | Audiveris read |
+|---|---|
+| 16 | 6 |
+| 24 | 4 (and once, not a rest at all) |
+| 14 | 4 |
+| 34 | 4 |
+| 27 | 7 |
+
+Reading the page's own numbers and making the recognition agree with them
+brings that to **402 measures**, with the first page exact — and it is not a
+guess anywhere: a multi-measure rest has no content beyond its length, so a
+rest the engine missed can be *restored* rather than approximated.
+
+### How each is found
+
+Both follow the rule the rehearsal marks already follow: find the shape, then
+read only the shape's label.
+
+- **The rest** is a thick bar centred on the middle staff line, about seven
+  tenths of a space deep, with clear white above and below it. The white has to
+  be looked for *between* the staff lines — a window that reaches across a line
+  finds ink every time and the test never fires. Measured on the timpani part
+  that finds every rest and no barline, stem or beam.
+- **The number** is a cluster of digit-sized ink above the staff. Digits of one
+  number share a baseline, which is the condition that stops "323" swallowing
+  the "(tr)" printed beside it and being thrown out as too tall.
+
+### The sequence is the check, twice over
+
+Neither number is trusted on its own reading.
+
+The bar numbers are chosen *as a set*: each system offers several digit
+clusters, and the one that is the bar number is the one that lets the whole
+part ascend. That is the same longest-chain treatment the rehearsal letters
+get, with two extra conditions that come free from what a system is — the
+number cannot climb slower than one per system, and a jump of hundreds in one
+system is a misread rather than a very long rest.
+
+The rest counts are then checked by arithmetic, and this is the part that makes
+the whole thing safe. Once the printed bars of a system are counted, the total
+of its rests is *forced*:
+
+    sum of rests = (bars the numbers demand) − (written bars) + (number of rests)
+
+So one unreadable count is solved for, not guessed — the 24 that no OCR setting
+would read came out of this. One *wrong* count can also be solved for, but only
+when a single position can be changed to fix the sum **and** the new value looks
+like a misreading of what was read there: 4 for 44, 27 for 2. Anything less
+certain is refused and reported. A part with a rest of the wrong length is
+worse than a part that says it does not know, because a player counting 16 bars
+of rest cannot tell they were meant to count 24 until it is too late.
+
+### When it still cannot be worked out
+
+Then the missing bars go in as rests anyway, and are reported. This looks like
+the app inventing music and is the opposite: bar numbers are what a part is
+*for* at a rehearsal, and three bars missing from system one puts every later
+number one system out of step with the conductor's score. Better to hand over
+three bars marked "proofread these" than four hundred that cannot be counted
+from.
+
+### Two OCR settings, and why there are two
+
+Measured against numbers read off by eye first, on the same page:
+
+| | psm 7 | psm 8 / 13 |
+|---|---|---|
+| bar numbers (small light italic) | 14–17 of 19 | **18 of 19** |
+| rest counts (large bold italic) | **16 of 16** | 11–14 of 16 |
+
+And 8 and 13 agree with *each other* on the wrong answer for the rest counts,
+so a majority vote across all three is worse than psm 7 alone. Scale matters as
+much as the mode: at about 70 px tall the bold italic 7 of this engraving came
+back as 4, 2 and 5 on different pages; at 150 px the same crops read 7 every
+time.
+
+## Rehearsal marks on a part, and three ideas that made them worse
+
+Reading marks off a *part* is harder than off a score, and the difference is
+not the letters — it is that a part has a dozen systems to a page. Two things
+followed from that:
+
+- Search **every** system, not the first. On a score there is one system to a
+  page and it made no difference; on the timpani part, looking at the first
+  alone found three letters of fifteen and put them in the wrong bars.
+- Stop at the staff above. Twelve staff spaces of "empty margin" above a
+  system on a part is the *previous system*, and its noteheads and rest counts
+  became rehearsal boxes.
+
+The marks are then kept as (system, bar in that system) rather than as a
+measure number, because a multi-measure rest is one bar on the page and several
+measures in the recognition; the two only line up once the recognised systems
+are in hand.
+
+Three further ideas were tried against the score's twenty-two boxes, where the
+right answer — A to O — is known. All three are worth recording as **rejected**:
+
+1. **Isolating the letter from its frame** by connected components before
+   reading it. Plausible, and it broke the run: C read as K, D as G. Tesseract
+   does its own thresholding and layout work on what it is handed, and a tight
+   crop takes that away.
+2. **Enlarging the letter** to about 150 px, which is exactly what fixed the
+   rest counts. It broke the run here too.
+3. **Searching over box thresholds** — try 0.30, 0.20, 0.12 and keep whichever
+   yields the longest run of consecutive letters. This is the detector's own
+   ink-strategy pattern and it looked like the right shape of answer. At 0.20
+   the score's page yields fifty boxes and the longest run is **A to U**, on a
+   piece that has A to O. A run is good evidence that what was read is real; it
+   is not evidence that nothing else was invented.
+
+What *did* help is a rule about the answer rather than about the reading: a run
+of rehearsal letters begins at **A**. A run that starts anywhere else is a run
+of misreadings that happens to ascend, and it is discarded rather than placed.
+On the timpani part that means no marks at all, and that is the honest outcome
+— the run in the best reading available there is F to P over marks that are in
+fact A to O, and placing it would put the wrong letter over fifteen bars.
+
 ## Still open
 
 - Multi-system pages. `layout.group_systems` is written and unit tested against
@@ -334,24 +472,28 @@ are the same thirteen characters.
 - OCR labels. `name:` works through `pytesseract` if it is installed; it has
   never been run here, and the labels on a score are 2 mm high and abbreviated,
   so treat it as a convenience and check with `inspect --overlay`.
-- **How good a retype can get — measured, both parts, all 27 pages.**
+- **How good a retype can get — measured, two sources of the same piece.**
 
-  | | Optional Percussion | Timpani |
+  | | Optional Percussion (from the score) | Timpani (the publisher's part) |
   |---|---|---|
-  | bars counted in the scan | 400 | 409 |
-  | measures read | 388 | 402 |
-  | measures that do not add up | 87 (22 %) | **8 (2 %)** |
-  | pages that failed outright | 1 of 27 | 0 |
+  | pages | 27 of a bound score | 2 |
+  | bars the source says it has | 414, by counting barlines | **403**, from the printed bar numbers |
+  | measures read | 402 | 402 |
+  | measures that do not add up | 8 (2 %) | 6 (1.5 %) |
+  | rehearsal marks recovered | A–O, all fifteen | none readable |
 
-  The pitched part is nearly clean; the percussion part is a draft. That is the
-  expected shape — percussion is two voices of unpitched noteheads with nothing
-  to check a pitch against — but it is worth stating plainly rather than
-  averaging the two into a claim about "OMR".
+  The piece is **401 bars** — the part prints 398 above its last system and has
+  four bars after it. So two entirely separate readings, of two different
+  printings, by two different routes, agree to within one measure of each other
+  and of the truth. That is the strongest evidence the retype has produced.
 
-  One page (18) failed in Audiveris and the run carried on without it, which is
-  the designed behaviour: the other 26 pages are not lost because one is hard.
-  Its measures are simply missing from the result, which is exactly what the
-  bar-count cross-check is there to reveal.
+  Counting barlines made 414 of a 401-bar piece; the printed numbers made 403.
+  Where a part carries numbers, they are the count to believe.
+
+  An earlier version of this table reported the Timpani row from a file that
+  had in fact been produced from the *score*, renamed. Two rows with identical
+  suspect-measure lists is what gave it away, and it is a good reason to keep
+  a report's `part` field honest.
 - **Whether feeding the engine a bigger staff helps.** The draft is rendered at
   `--omr-staff-mm 2.2` and `--omr-dpi 400`; neither number has been varied.
 - **Retyping anything but the two parts from the bound score.** Detection is

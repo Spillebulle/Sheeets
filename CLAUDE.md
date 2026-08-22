@@ -38,6 +38,32 @@ a page-by-page report rather than prose.
 Never soften that. If a change makes the retype path look more confident than
 its numbers justify, it is the wrong change.
 
+## A part carries evidence a score does not
+
+When the source is a *part* — one staff to a system — the page prints its own
+answer key: a bar number over every system after the first, and a count over
+every multi-measure rest. `barnum.py` reads both, and `retype._reconcile` makes
+the recognition agree with them. This is the only outside check the retype
+half has, and it caught a failure nothing internal could: a 401-bar timpani
+part recognised as 255 measures, every measure of it well formed.
+
+Rules that keep it honest, and that must survive a refactor:
+
+- **Read it only where it belongs.** The numbers above the top staff of a
+  *score* system are the top instrument's, not the part's. `_is_a_part` gates
+  the whole thing on every system having exactly one staff.
+- **Arithmetic before OCR.** Once the printed bars are counted, the total of a
+  system's rests is forced by the bar numbers. One unreadable count is solved
+  for; one wrong count is corrected only if a single change fixes the sum *and*
+  the new value looks like a misreading of what was read. Anything less certain
+  is refused and reported.
+- **A restored rest is not a guess** — a multi-measure rest has no content
+  beyond its length — but changing a rest's length silently would be. Every
+  change is reported and lands in the report's warnings.
+- **Padding is for the numbering, not for the music.** Where bars cannot be
+  recovered they go in as rests so that bar 300 is still bar 300, and they are
+  named for proofreading. Never quietly.
+
 ## Shape
 
 Stages are independent and registered, and that is worth protecting:
@@ -84,12 +110,23 @@ only thing that catches it.
   evenly printed and complete, which is exactly what real paper is not.
 - Stopping at the first binarisation that "looks reasonable". Eleven evenly
   spaced staves look perfectly healthy on a page that has thirteen.
+- Taking the longest run of rehearsal letters as the right one. Loosening the
+  box detector doubles what is found and the longest run gets *longer* — A to U
+  on a piece with A to O. A run says what was read is real; it says nothing
+  about what else was invented. A run that does not begin at A is not placed.
+- Handing tesseract a tighter, cleaner, bigger crop. It does its own
+  thresholding and layout work on what it is given. Isolating a rehearsal
+  letter from its frame and enlarging it — both plausible, both measured, both
+  broke a run that the plain crop reads correctly. The same enlargement is
+  what *fixed* the rest counts. Measure per case; do not generalise.
+- Believing a barline count. It made 414 of a 401-bar part. Where the page
+  prints bar numbers, they are the count.
 
 ## Commands
 
 ```console
 pip install -e .[dev]
-python -m pytest                                    # 65 tests, no score needed
+python -m pytest                                    # 110 tests, no score needed
 sheeets engines                                     # what is installed here
 sheeets inspect score.pdf --pages 3- --overlay out/ # what is on the page
 sheeets extract score.pdf --part bottom -o part.pdf
