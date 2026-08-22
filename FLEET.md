@@ -44,11 +44,36 @@ actual files.
 | **a born-digital part** | drum-kit noteheads, very tight semiquaver writing, no scanning artefacts at all | — |
 | **three players stacked on one page** | must work taken whole *and* split into one player | the split and the whole gave identical output |
 | **hand-copied manuscript** | irregular everything; the metre changes almost every bar | — |
-| **a book of every part in one file** | one PDF, each part in a run of pages | (splitting it by part is not built yet) |
+| **a book of every part in one file** | one PDF, each part in a run of pages | split by the title recurring in the page headers; twenty parts found |
 
 Two useful properties of that list: every case is a *part* except the first, so
 the fleet is mostly testing the thing a user actually has; and the cases are
 ordered by how much they hurt, which makes a regression easy to place.
+
+## What `--retype` found the first time it was run over all of them
+
+Detection had been green on all ten for some time; recognition had been
+measured on two. Running the rest turned up faults that no amount of looking at
+those two would have shown, and none of them were in the recognition:
+
+- **Two cases produced no PDF at all**, both because musicxml2ly died — once on
+  a rest with a length and no written value, once on an OCR'd tempo marking
+  containing a double quote, which closed the LilyPond string it was written
+  into. Both errors name LilyPond's internals rather than the bar, and one of
+  them leaves a `.ly` truncated mid-measure so the *next* error is a syntax
+  error hundreds of lines later. See NOTES.md.
+- **A part with no printed bar numbers still offered five digit-shaped
+  readings**, and the run chosen from them said a 77-measure part was twelve
+  bars long. That number would have been used as the authority to "repair" the
+  recognition against. Bar numbers are now used only where most systems carry
+  one.
+
+Recognition quality varies more between cases than anything else in the
+pipeline, and it is worth knowing the spread before trusting any single figure:
+a clean engraved part comes back within one measure of the truth, a drum-kit
+part with tight semiquaver writing has most of its bars flagged, and a
+third-generation photocopy loses three quarters of them. The extract half is
+unaffected — it is geometry, and it is right on all ten.
 
 ## The manifest
 
