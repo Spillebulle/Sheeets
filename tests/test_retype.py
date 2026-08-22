@@ -93,3 +93,59 @@ def test_a_clean_proof_sheet_says_there_is_nothing_to_do(score_pdf, tmp_path):
     out = write_proof(extraction, result(), tmp_path / "proof.pdf")
     with pymupdf.open(out) as document:
         assert "nothing flagged" in document[0].get_text()
+
+
+FAKE_ENGINE = '''
+import pathlib, sys
+inp, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+out.mkdir(parents=True, exist_ok=True)
+MEASURE = """    <measure number="%d">
+      <attributes><divisions>1</divisions><key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <clef><sign>G</sign><line>2</line></clef></attributes>
+      <note><pitch><step>C</step><octave>5</octave></pitch>
+        <duration>4</duration><type>whole</type></note>
+    </measure>
+"""
+for image in sorted(inp.glob("*.png")):
+    body = "".join(MEASURE % n for n in range(1, 5))
+    (out / (image.stem + ".musicxml")).write_text(
+        \'<?xml version="1.0"?>\\n<score-partwise version="4.0">\'
+        \'<part-list><score-part id="P1"><part-name>X</part-name></score-part></part-list>\'
+        \'<part id="P1">\' + body + \'</part></score-partwise>\')
+'''
+
+
+@pytest.mark.skipif(
+    not __import__("sheeets.engrave", fromlist=["x"]).LilyPondEngraver().available(),
+    reason="LilyPond is not installed",
+)
+def test_the_whole_retype_runs_and_reports(score_pdf, tmp_path, monkeypatch):
+    import pymupdf
+
+    from sheeets.recognize import ExternalRecognizer
+    from sheeets.retype import retype
+
+    script = tmp_path / "engine.py"
+    script.write_text(FAKE_ENGINE)
+    monkeypatch.setenv("SHEEETS_OMR_COMMAND", f"python3 {script} {{input}} {{output}}")
+
+    out = tmp_path / "fresh.pdf"
+    result = retype(
+        score_pdf, part="bottom", out=out, read_from="part",
+        engine=ExternalRecognizer(), workdir=tmp_path / "work",
+        proof=tmp_path / "proof.pdf", part_name="Perc", title="Fixture",
+    )
+    assert out.exists()
+    assert result.musicxml.exists()
+    assert result.proof_pdf.exists()
+    with pymupdf.open(out) as document:
+        assert document.page_count >= 1
+    # Four measures per draft page, joined and renumbered from 1.
+    assert result.measures_read == 4 * len(result.spans)
+    assert result.spans[0].first_measure == 1
+    # The fixture holds 8 bars per staff on each of its two pages; the fake
+    # engine invents 4 per page, so the cross-check must call this suspect.
+    assert result.bars_in_scan == 16
+    assert not result.trustworthy
+    assert result.report()["pages"]
