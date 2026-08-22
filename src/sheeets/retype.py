@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Sequence
 
-from . import crop, score_xml
+from . import crop, marks as marks_mod, score_xml
 from .engrave import LilyPondEngraver
 from .model import Extraction
 from .paper import PageSetup
@@ -78,10 +78,20 @@ class RetypeResult:
     spans: list[PageSpan] = field(default_factory=list)
     bars_by_page: dict[int, int] = field(default_factory=dict)
     proof_pdf: Path | None = None
+    guessed: list[int] = field(default_factory=list)
 
     @property
     def bad_measures(self) -> list[MeasureCheck]:
-        return [c for c in self.checks if not c.ok]
+        """Measures to look at: ones that do not add up, and ones that were
+        filled in to make them add up.  A guess that has been tidied away is
+        still a guess."""
+        suspect = [c for c in self.checks if not c.ok]
+        seen = {c.number for c in suspect}
+        by_number = {c.number: c for c in self.checks}
+        for number in self.guessed:
+            if number not in seen and number in by_number:
+                suspect.append(by_number[number])
+        return sorted(suspect, key=lambda c: c.number)
 
     @property
     def trustworthy(self) -> bool:
@@ -89,6 +99,7 @@ class RetypeResult:
         return (
             bool(self.checks)
             and not self.bad_measures
+            and not self.guessed
             and self.measures_read == self.bars_in_scan
         )
 
@@ -187,6 +198,8 @@ def retype(
     workdir: str | Path | None = None,
     reuse: bool = False,
     jobs: int = 1,
+    graft: bool = True,
+    rehearsal_marks: bool = True,
     proof: str | Path | None = None,
     progress: Progress | None = None,
 ) -> RetypeResult:
@@ -248,11 +261,14 @@ def retype(
     # on.  Measured on this score, reading the score pages found nearly twice
     # as many measures as reading the part draft.
     warnings: list[str] = []
+    marks_of_page: dict[int, list[tuple[int, str]]] = {}
     if read_from == "score":
         staff_of_page = {
             segment.band.page_index: segment.band.staff_index
             for segment in extraction.segments
         }
+        if rehearsal_marks:
+            marks_of_page = _find_marks(extraction, say)
         images = _rasterise_source(source, sorted(staff_of_page), holder / "pages",
                                    dpi=omr_dpi)
     else:
@@ -300,11 +316,19 @@ def retype(
 
     trees = []
     read_pages: list[tuple[int, int]] = []
+    grafted = 0
+    lettered = 0
     for page_index, produced_path in sorted(produced):  # back into playing order
         try:
-            tree = score_xml.read(produced_path)
+            page_tree = score_xml.read(produced_path)
+            tree = page_tree
             if read_from == "score":
-                tree = score_xml.select_staff(tree, staff_of_page[page_index])
+                tree = score_xml.select_staff(page_tree, staff_of_page[page_index])
+                if graft:
+                    grafted += score_xml.graft_directions(page_tree, tree)
+                found = marks_of_page.get(page_index)
+                if found:
+                    lettered += score_xml.add_rehearsal_marks(tree, found)
             trees.append(tree)
             read_pages.append((page_index, score_xml.count_measures(tree)))
         except Exception as exc:
@@ -312,9 +336,22 @@ def retype(
     if not trees:
         raise RuntimeError(f"{recognizer.name} could not read any page")
 
+    if grafted:
+        say(f"{grafted} tempo marking(s) taken from the top staff")
+    if lettered:
+        say(f"{lettered} rehearsal mark(s) read off the score and added")
+
     # 3. Join and count.
     tree = score_xml.merge_trees(trees, part_name=part_name or extraction.part_name)
+    seams = score_xml.smooth_seams(tree)
+    for line in seams:
+        say(line)
     repairs = score_xml.sanitize(tree)
+    guesses = score_xml.fill_incomplete(tree)
+    repairs.extend(str(g) for g in guesses)
+    guessed = sorted({g.measure for g in guesses if g.measure})
+    if guessed:
+        say(f"{len(guessed)} bar(s) had to be filled or padded: they are flagged")
     if repairs:
         warnings.extend(repairs)
         say(f"{len(repairs)} structural repair(s) before engraving")
@@ -350,6 +387,7 @@ def retype(
         warnings=warnings + extraction.warnings,
         spans=spans,
         bars_by_page=bars_by_page,
+        guessed=guessed,
     )
     if proof:
         from .proof import write_proof
@@ -358,6 +396,32 @@ def retype(
         say(f"proof sheet: {result.proof_pdf}")
     say(result.summary())
     return result
+
+
+def _find_marks(extraction: Extraction, say) -> dict[int, list[tuple[int, str]]]:
+    """Rehearsal letters, read off the score by shape, per page.
+
+    They are found on the page rather than in the recognised MusicXML because
+    the OMR engine does not see them: a boxed letter above a nineteen-stave
+    system is not text it can pick out, but it is the most distinctive shape on
+    the page.  See `sheeets.marks`.
+    """
+    out: dict[int, list[tuple[int, str]]] = {}
+    letters: list[str] = []
+    for page in extraction.detected:
+        if not page.systems:
+            continue
+        system = page.systems[0]
+        top = system.staves[0]
+        found = marks_mod.find_marks(page.image, top.top, top.space)
+        if not found:
+            continue
+        bars = system_barlines(page, system)
+        out[page.page.index] = [(marks_mod.measure_of(m, bars), m.text) for m in found]
+        letters.extend(m.text for m in found)
+    if letters:
+        say("rehearsal marks found: " + " ".join(letters))
+    return out
 
 
 def _rasterise(pdf: Path, folder: Path, dpi: float) -> list[tuple[int, Path]]:

@@ -158,3 +158,12 @@ def test_selecting_a_middle_staff_of_a_grand_staff_takes_the_whole_part(tmp_path
 def test_selecting_a_staff_that_is_not_there_says_so(tmp_path):
     with pytest.raises(ValueError, match="staff 9"):
         score_xml.select_staff(two_staff(tmp_path), 9)
+
+
+def test_a_bar_rest_that_is_not_a_bar_long_is_corrected(tmp_path):
+    # Audiveris writes 36 where the bar is 24 (divisions 2, 4/4 -> 8 here).
+    notes = '<note><rest measure="yes"/><duration>12</duration></note>'
+    tree = score_xml.merge([make(tmp_path, "a.musicxml", notes)])
+    repairs = score_xml.sanitize(tree)
+    assert any("bar rest lasted 12 where the bar is 8" in r for r in repairs)
+    assert tree.getroot().findtext(".//note/duration") == "8"

@@ -132,6 +132,99 @@ def select_staff(tree: ET.ElementTree, staff_index: int) -> ET.ElementTree:
     return ET.ElementTree(root)
 
 
+TEMPO_WORDS = (
+    "presto", "allegro", "andante", "adagio", "largo", "lento", "vivace",
+    "moderato", "maestoso", "grave", "tempo", "mosso", "meno", "piu", "più",
+    "rit", "ritard", "rall", "accel", "stretto", "cantabile", "marcato",
+)
+
+
+def looks_like_a_rehearsal_mark(text: str) -> bool:
+    """A boxed letter or number over the system: A, B, 12, C1."""
+    text = (text or "").strip()
+    return 1 <= len(text) <= 3 and (text.isupper() or text.isdigit()) and text.isalnum()
+
+
+def looks_like_a_tempo(text: str) -> bool:
+    lowered = (text or "").strip().lower().rstrip(".")
+    return any(lowered.startswith(word) for word in TEMPO_WORDS)
+
+
+def graft_directions(page: ET.ElementTree, target: ET.ElementTree,
+                     from_part: int = 0) -> int:
+    """Copy the markings a score prints only over its top staff.
+
+    A conductor's score puts the tempo and the rehearsal letters above the first
+    staff and nowhere else — they belong to the whole system, not to the piccolo.
+    Cut the bottom staff out and they are gone, and a band part without its
+    rehearsal letters is not much use at a rehearsal.
+
+    Only what is genuinely the system's is copied: rehearsal marks, metronome
+    marks, and words that read as a tempo.  A dynamic or a "solo" over the top
+    staff belongs to *that* instrument and is left where it is.
+    """
+    parts = page.getroot().findall("part")
+    if len(parts) <= from_part:
+        return 0
+    source_measures = parts[from_part].findall("measure")
+    target_part = target.getroot().find("part")
+    if target_part is None:
+        return 0
+    target_measures = target_part.findall("measure")
+
+    grafted = 0
+    for index, source in enumerate(source_measures):
+        if index >= len(target_measures):
+            break
+        for direction in source.findall("direction"):
+            kind = direction.find("direction-type")
+            if kind is None:
+                continue
+            wanted = False
+            for child in kind:
+                if child.tag in {"rehearsal", "metronome"}:
+                    wanted = True
+                elif child.tag == "words" and (
+                    looks_like_a_tempo(child.text) or looks_like_a_rehearsal_mark(child.text)
+                ):
+                    wanted = True
+            if not wanted:
+                continue
+            copied = copy.deepcopy(direction)
+            copied.set("placement", "above")
+            attributes = target_measures[index].find("attributes")
+            at = list(target_measures[index]).index(attributes) + 1 if attributes is not None else 0
+            target_measures[index].insert(at, copied)
+            grafted += 1
+    return grafted
+
+
+def add_rehearsal_marks(tree: ET.ElementTree, marks: list[tuple[int, str]]) -> int:
+    """Put rehearsal marks into a page's part, given (measure index, text)."""
+    part = tree.getroot().find("part")
+    if part is None:
+        return 0
+    measures = part.findall("measure")
+    added = 0
+    for index, text in marks:
+        if not text or index >= len(measures):
+            continue
+        measure = measures[index]
+        if any(r.text == text for r in measure.iter("rehearsal")):
+            continue
+        direction = ET.Element("direction")
+        direction.set("placement", "above")
+        kind = ET.SubElement(direction, "direction-type")
+        rehearsal = ET.SubElement(kind, "rehearsal")
+        rehearsal.set("enclosure", "rectangle")
+        rehearsal.text = text
+        attributes = measure.find("attributes")
+        at = list(measure).index(attributes) + 1 if attributes is not None else 0
+        measure.insert(at, direction)
+        added += 1
+    return added
+
+
 def set_titles(tree: ET.ElementTree, title: str = "", part_name: str = "",
                composer: str = "", part_abbreviation: str | None = "") -> ET.ElementTree:
     """Put the titling into the MusicXML, where musicxml2ly will find it.
@@ -209,6 +302,45 @@ def sanitize(tree: ET.ElementTree) -> list[str]:
                         f"set to {fallback}"
                     )
 
+    # A whole-bar rest whose duration is not a bar.  Audiveris writes 36 where
+    # the bar is 24 on 58 of this part's 269 bar rests, and the consequence is
+    # invisible in the notes and obvious on the page: LilyPond lays that bar out
+    # one and a half bars wide, so every following bar in the system is shoved
+    # sideways and the part looks mis-barred when the music underneath is right.
+    # `measure="yes"` already means "one bar, whatever the number says", so
+    # making the number agree changes nothing but the engraving.
+    div, beats, beat_type = 1, 4, 4
+    for measure in part.findall("measure"):
+        attributes = measure.find("attributes")
+        if attributes is not None:
+            declared = attributes.findtext("divisions")
+            if declared and declared.strip().isdigit() and int(declared) > 0:
+                div = int(declared)
+            time = attributes.find("time")
+            if time is not None:
+                if (time.findtext("beats") or "").isdigit():
+                    beats = int(time.findtext("beats"))
+                if (time.findtext("beat-type") or "").isdigit():
+                    beat_type = int(time.findtext("beat-type"))
+        want = Fraction(div * 4 * beats, beat_type)
+        if want.denominator != 1:
+            continue
+        for note in measure.findall("note"):
+            rest = note.find("rest")
+            if rest is None or rest.get("measure") != "yes":
+                continue
+            duration = note.find("duration")
+            if duration is None:
+                duration = ET.SubElement(note, "duration")
+                duration.text = str(int(want))
+                notes.append(f"measure {measure.get('number')}: bar rest had no duration")
+            elif duration.text != str(int(want)):
+                notes.append(
+                    f"measure {measure.get('number')}: bar rest lasted "
+                    f"{duration.text} where the bar is {int(want)}"
+                )
+                duration.text = str(int(want))
+
     # A note with neither a <type> nor a positive <duration> cannot be
     # engraved, and LilyPond does not say so politely: its own error path
     # references an undefined variable and dies with a NameError inside
@@ -258,6 +390,143 @@ def sanitize(tree: ET.ElementTree) -> list[str]:
                 notations.remove(tuplet)
                 notes.append(f"tuplet {number} in voice {voice} never stopped")
     return notes
+
+
+def smooth_seams(tree: ET.ElementTree) -> list[str]:
+    """Make 27 pages of a score read as one part.
+
+    Two things come along with the pages and do not belong in a part:
+
+    * **The score's own page and system breaks.**  MusicXML carries them as
+      `<print new-system="yes">`, musicxml2ly turns them into `\break`, and a
+      break stops LilyPond merging whole-bar rests across it.  The publisher's
+      Timpani part shows a seven-bar multi-rest where this showed "2" then "5"
+      — the run was split at the score's page boundary, which the player has no
+      reason to care about.
+    * **The clef, key, metre, divisions and staff details restated on every
+      page.**  Each page begins by declaring them, correctly, because each page
+      is its own document.  Joined end to end that is twenty-seven redundant
+      clef changes down the part — and worse, an `<attributes>` element in the
+      middle of a run of empty bars stops musicxml2ly merging them, which is
+      what split a seven-bar rest into "2" and "5".
+
+    Both are removed by comparing against what is already in force, so a real
+    change — a clef change, a change of metre — still comes through.
+    """
+    notes: list[str] = []
+    part = tree.getroot().find("part")
+    if part is None:
+        return notes
+
+    breaks = 0
+    for measure in part.findall("measure"):
+        for element in list(measure.findall("print")):
+            measure.remove(element)
+            breaks += 1
+    if breaks:
+        notes.append(f"removed {breaks} page/system break(s) inherited from the score")
+
+    state: dict[str, str] = {}
+    dropped = 0
+    for index, measure in enumerate(part.findall("measure")):
+        attributes = measure.find("attributes")
+        if attributes is None:
+            continue
+        for child in list(attributes):
+            # `divisions` and `staff-details` are restated on every page too,
+            # and they matter as much as the clef: musicxml2ly treats *any*
+            # <attributes> mid-run as a reason to end a multi-measure rest, so
+            # one redundant `<divisions>6</divisions>` is what turned the
+            # publisher's seven-bar rest into "2" and "5".
+            if child.tag not in {"clef", "key", "time", "divisions", "staff-details"}:
+                continue
+            signature = ET.tostring(child, encoding="unicode")
+            signature = " ".join(signature.split())
+            key = child.tag + (child.get("number") or "")
+            if index > 0 and state.get(key) == signature:
+                attributes.remove(child)
+                dropped += 1
+            else:
+                state[key] = signature
+        if len(attributes) == 0:
+            measure.remove(attributes)
+    if dropped:
+        notes.append(f"removed {dropped} restatement(s) of a clef, key or time signature")
+    return notes
+
+
+@dataclass
+class Repair:
+    """One structural change, and whether it was a guess.
+
+    A repair that only rearranges the file (a redundant clef, a barline's
+    duration) is bookkeeping.  A repair that *invents* music — filling an empty
+    bar, padding a short one — is a guess, and a guess has to stay visible: it
+    is flagged, it keeps the run untrustworthy, and it names the bar so somebody
+    can look at it.
+    """
+
+    text: str
+    measure: int | None = None
+    guess: bool = False
+
+    def __str__(self) -> str:  # so a caller can keep treating these as lines
+        return self.text
+
+
+def fill_incomplete(tree: ET.ElementTree) -> list[Repair]:
+    """Make every bar last a bar, and say where music had to be invented.
+
+    An empty bar and a bar half a beat short are both engraving hazards: the
+    first collapses to nothing, the second pushes everything after it sideways.
+    Neither can be left, and neither can be repaired honestly — the notes that
+    should be there were not read.  So they are filled with rests and reported
+    as guesses.
+    """
+    out: list[Repair] = []
+    part = tree.getroot().find("part")
+    if part is None:
+        return out
+    div, beats, beat_type = 1, 4, 4
+    for measure in part.findall("measure"):
+        attributes = measure.find("attributes")
+        if attributes is not None:
+            declared = attributes.findtext("divisions")
+            if declared and declared.strip().isdigit() and int(declared) > 0:
+                div = int(declared)
+            time = attributes.find("time")
+            if time is not None:
+                if (time.findtext("beats") or "").isdigit():
+                    beats = int(time.findtext("beats"))
+                if (time.findtext("beat-type") or "").isdigit():
+                    beat_type = int(time.findtext("beat-type"))
+        want = Fraction(div * 4 * beats, beat_type)
+        if want.denominator != 1:
+            continue
+        want = int(want)
+        number = int(measure.get("number") or 0)
+
+        notes = [n for n in measure.findall("note") if n.find("chord") is None]
+        if any(n.find("rest") is not None and n.find("rest").get("measure") == "yes"
+               for n in notes):
+            continue
+        total = sum(int(n.findtext("duration") or 0) for n in notes)
+
+        if total == 0 and not notes:
+            note = ET.SubElement(measure, "note")
+            rest = ET.SubElement(note, "rest")
+            rest.set("measure", "yes")
+            ET.SubElement(note, "duration").text = str(want)
+            out.append(Repair(f"measure {number}: nothing was read; filled with a bar's rest",
+                              measure=number, guess=True))
+        elif 0 < total < want:
+            note = ET.SubElement(measure, "note")
+            ET.SubElement(note, "rest")
+            ET.SubElement(note, "duration").text = str(want - total)
+            out.append(Repair(
+                f"measure {number}: short by {Fraction(want - total, want)} of a bar; "
+                f"padded with a rest", measure=number, guess=True))
+    return out
 
 
 @dataclass
