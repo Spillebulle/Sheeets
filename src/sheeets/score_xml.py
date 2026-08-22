@@ -243,6 +243,13 @@ def set_titles(tree: ET.ElementTree, title: str = "", part_name: str = "",
         if node is None:
             node = ET.SubElement(work, "work-title")
         node.text = title
+        # musicxml2ly prints the movement title as a subtitle under the title.
+        # Audiveris fills it in with whatever it read largest on the page,
+        # which for a score page is the title again — so the fresh part came
+        # out with its name printed twice, one line under the other.
+        for movement in root.findall("movement-title"):
+            if (movement.text or "").strip() == title.strip():
+                root.remove(movement)
     if composer:
         ident = root.find("identification")
         if ident is None:
@@ -260,6 +267,13 @@ def set_titles(tree: ET.ElementTree, title: str = "", part_name: str = "",
         for tag in (".//part-name", ".//instrument-name"):
             for node in root.findall(tag):
                 node.text = part_name
+        # The abbreviation is what musicxml2ly writes down the left margin of
+        # every system after the first, and Audiveris fills it in from the
+        # score's own staff label — a percussion part came out abbreviated
+        # "Timpani".  Unless the caller asks for one, take it out.
+        if part_abbreviation is not None:
+            for node in root.findall(".//part-abbreviation"):
+                node.text = part_abbreviation
     return tree
 
 

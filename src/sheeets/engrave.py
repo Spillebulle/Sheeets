@@ -72,7 +72,8 @@ class LilyPondEngraver:
 
         ly.write_text(
             _with_layout(ly.read_text(encoding="utf-8"), staff_size, paper, landscape,
-                         systems=_systems_for(musicxml)),
+                         systems=_systems_for(musicxml),
+                         indent_cm=_indent_for(musicxml)),
             encoding="utf-8",
         )
 
@@ -143,8 +144,29 @@ def _systems_for(musicxml: Path, target_events: int = 20) -> int | None:
     return max(1, -(-drawn // per_line))
 
 
+def _indent_for(musicxml: Path) -> float:
+    """How much room the first system needs for the instrument's name.
+
+    LilyPond does not grow the indent to fit the name; it draws the name to the
+    left of the staff and lets it run off the paper.  "Optional Percussion"
+    came out as "l Percussion" with the rest past the edge of the page.  At the
+    default font a character is about 1.9 mm wide, so the indent follows from
+    the name — floored at the 1.2 cm that looks right for a short one, and
+    capped so a long one cannot eat the system.
+    """
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.parse(musicxml).getroot()
+    except Exception:
+        return 1.2
+    names = [(n.text or "").strip() for n in root.iter("part-name")]
+    longest = max((len(n) for n in names), default=0)
+    return round(min(5.0, max(1.2, 0.6 + 0.19 * longest)), 2)
+
+
 def _with_layout(source: str, staff_size: float, paper: str, landscape: bool,
-                 systems: int | None = None) -> str:
+                 systems: int | None = None, indent_cm: float = 1.2) -> str:
     """Give the file our page and staff size, and take away the score's.
 
     musicxml2ly writes its own `\paper` block and its own
@@ -168,7 +190,7 @@ def _with_layout(source: str, staff_size: float, paper: str, landscape: bool,
         f"#(set-global-staff-size {staff_size:g})",
         f'#(set-default-paper-size "{paper}"{" (quote landscape)" if landscape else ""})',
         "\\paper {",
-        "    indent = 1.2\\cm",
+        f"    indent = {indent_cm:g}\\cm",
         "    short-indent = 0\\cm",
         "    ragged-last-bottom = ##t",
         # Let the last page end where the music does rather than spreading the
@@ -194,7 +216,10 @@ def _with_layout(source: str, staff_size: float, paper: str, landscape: bool,
 _REST_SHAPE = """
         \\override MultiMeasureRest.minimum-length = #16
         \\override MultiMeasureRest.space-increment = #3
-        \\override MultiMeasureRestNumber.staff-padding = #1.2"""
+        \\override MultiMeasureRestNumber.staff-padding = #1.2
+        %% A rehearsal letter is printed in a box on the score it came from,
+        %% and a player looks for the box rather than for the letter.
+        \\override RehearsalMark.stencil = #(make-stencil-boxer 0.1 0.6 ly:text-interface::print)"""
 
 
 def _with_rest_shape(source: str) -> str:
