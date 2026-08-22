@@ -81,6 +81,20 @@ Stages are independent and registered, and that is worth protecting:
   engraver dead. It must never change which notes are played, and every repair
   it makes is reported.
 
+## Look at the PDF
+
+The retype half checks itself with numbers, and the numbers are worth what they
+say — but the first time the retyped timpani part was *looked at* rather than
+counted it was correct and unusable: multi-measure rests drawn as two dozen
+empty bars, the instrument's name half off the paper, the publisher's imprint
+sung across bar 211 as a lyric, and a line with thirty bars on it. None of that
+appears in any figure the run prints, and none of it would have been found by
+adding another check.
+
+So: open the PDF. Render a page and read it before believing a change to the
+engraving helped. `NOTES.md` has the four faults and what each one turned out
+to be.
+
 ## The fleet
 
 `FLEET.md` describes a set of real scans the pipeline is run over — a bound

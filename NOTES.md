@@ -462,6 +462,91 @@ On the timpani part that means no marks at all, and that is the honest outcome
 — the run in the best reading available there is F to P over marks that are in
 fact A to O, and placing it would put the wrong letter over fifteen bars.
 
+## The page the player actually reads
+
+Everything above is about getting the notes right. The first time the retyped
+timpani part was *looked at* rather than counted, it was correct and unusable,
+and none of what was wrong with it appears in any number the run prints. This
+is the argument for opening the PDF.
+
+**A multi-measure rest printed as that many empty bars.** Twenty-four bar lines
+with nothing between them, which is not something a player counts from. Two
+causes stacked on each other:
+
+1. Audiveris marks every measure of a multi-measure rest `print-object="no"` —
+   on the page they are not drawn, the thick bar stands for all of them — and
+   musicxml2ly takes that literally and writes a **spacer**. Nothing at all is
+   drawn. Making whole-bar rests visible again gets `R1*16` out of
+   musicxml2ly, which is a real multi-measure rest, drawn and numbered, and
+   which is also what MuseScore and Sibelius expect to find.
+2. The measures *this app adds* when it lengthens a rest were copied from one
+   of the rest's own bars — and an empty `<measure-style/>` left behind in the
+   copy is enough to end the rest as far as musicxml2ly is concerned. Nothing
+   but the rest survives the copy now.
+
+**Then LilyPond gave a sixteen-bar rest barely more width than a crotchet**,
+with its number pressed onto the staff between two barlines a few millimetres
+apart. `MultiMeasureRest.minimum-length`, `space-increment` and a little
+padding under the number fix it, and they are injected into whatever `\Score`
+context musicxml2ly wrote rather than into a second `\layout` block.
+
+**And LilyPond will not break a line for you.** It fills one and then breaks
+it, and a multi-measure rest costs it almost nothing, so the part came out with
+nine lines of five to eight bars and then one of about thirty — rests squeezed
+under their own minimum width, notes touching. There is no LilyPond setting
+for "bars per line". There is one for how many systems the whole part gets, and
+LilyPond distributes them, which is the same thing said from the other end.
+
+How many bars a line should hold is not a constant, and the interesting part is
+that it does not depend on the bars: it depends on **how much is in** one. So
+the target is a number of written events to a line, twenty, and the bars follow
+from it. The timpani part averages 2.25 events to a bar and lands on nine bars
+a line, which is close to what its own publisher does; a part of running
+semiquavers lands on four. Between four and twelve either way.
+
+Two things were tried here and are worth not trying again:
+
+- **`SpacingSpanner.base-shortest-duration` and `spacing-increment`.** Widening
+  the spacing unit changes where the *early* lines break and leaves the
+  over-full one exactly as it was. The line was not over-full because notes
+  were too narrow.
+- **Putting the breaks in explicitly** — `<print new-system="yes">` every N
+  bars, which musicxml2ly turns into a `\break`. This is worse, and the reason
+  is a detail of how musicxml2ly handles a second voice: it pads the silent
+  voice with one long skip per run of empty bars, and those runs do not line up
+  with the other voice's multi-measure rests. A break inside one leaves an
+  empty staff line behind and prints the rest twice. LilyPond has to be allowed
+  to choose *where*; all it needs is how many.
+
+**Two crashes, both in musicxml2ly, both from OCR.** The fleet was run with
+`--retype` for the first time over all ten cases and two produced no PDF at
+all:
+
+- A rest can arrive with a duration and no `<type>`: Audiveris knows how long
+  the gap is without deciding what rest to draw in it. musicxml2ly dies with
+  `'NoneType' object has no attribute 'print_ly'` — LilyPond's own error path,
+  naming nothing — and the `.ly` it leaves behind stops in the middle of a bar,
+  so the *next* error is a syntax error hundreds of lines later. Every note is
+  given a value worked out from its length now. A few lengths no single note
+  can be (20 against 12 divisions is five sixths of a bar) are cut to the
+  longest that fits, reported, and then padded by the bar filler.
+- A smudged tempo marking came back from OCR as `A"egro m0 to al ways`.
+  musicxml2ly writes text straight into a LilyPond string, the stray quote
+  closed it, and LilyPond died with "EOF found inside string" at the end of the
+  file. Quotes and backslashes are taken out of every piece of text.
+
+**And three things at the top of the page.** The instrument name is drawn to
+the left of the first system and LilyPond does not grow the indent to fit it,
+so "Optional Percussion" printed as "l Percussion" with the rest off the paper;
+the indent is worked out from the name. The title printed twice, one line under
+the other, because musicxml2ly prints the movement title as a subtitle and
+Audiveris fills that in with whatever it read largest on the page — which on a
+score page is the title. And the publisher's imprint along the bottom of the
+page had been read as **lyrics**, so the part carried "VERLAG AG, 4537
+Wicdlisbach," across bar 211 with a stanza mark "1." beside bar 1. What
+separates that from a song is not what the words say but how many notes have
+one: below one note in ten they are furniture.
+
 ## Still open
 
 - Multi-system pages. `layout.group_systems` is written and unit tested against
