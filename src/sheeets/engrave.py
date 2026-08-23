@@ -236,8 +236,21 @@ def _plain_staff(source: str) -> str:
 
     An ordinary Staff places a note by its pitch, which is exactly what
     Audiveris gives us: it reads *where on the staff* a notehead sits, not which
-    drum it is.  The clef is already in the music (`\\clef "percussion"`), so
-    the whole repair is the context name.
+    drum it is.
+
+    **And the clef has to place those pitches the way the reader did.**  This
+    is the half that is easy to miss, because the staff looks right and the
+    notes are simply in the wrong place.  LilyPond's `\\clef "percussion"` puts
+    middle C on the middle line; Audiveris writes its display positions as a
+    *treble* reader sees them.  Handed C5 and F4 under a percussion clef, both
+    landed **above** the staff a step apart — where the page has them four
+    steps apart and inside it.  Measured on the percussion part: with treble
+    positioning the bass drum sits in the first space and the snare in the
+    third, which is what the scan shows; with LilyPond's own the pair floats
+    off the top.
+
+    So the drawn glyph stays the neutral percussion clef, and only the pitch
+    placement is moved back to where it was read.
     """
     for was, now in (("\\new DrumStaff", "\\new Staff"),
                      ("\\context DrumStaff", "\\context Staff"),
@@ -245,7 +258,11 @@ def _plain_staff(source: str) -> str:
                      ("\\context DrumVoice", "\\context Voice"),
                      ("\\new DrumVoice", "\\new Voice")):
         source = source.replace(was, now)
-    return source
+    return source.replace(
+        '\\clef "percussion"',
+        '\\clef "percussion" \\set Staff.middleCPosition = #-6'
+        ' \\set Staff.middleCClefPosition = #-6',
+    )
 
 
 def _with_rest_shape(source: str) -> str:

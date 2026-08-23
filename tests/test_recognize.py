@@ -85,3 +85,16 @@ def test_a_percussion_part_is_not_put_on_a_drum_staff():
     assert "DrumStaff" not in out and "DrumVoice" not in out
     assert "\\new Staff" in out and '\\set Staff.instrumentName = "Perc"' in out
     assert '\\context Voice = "One"' in out
+
+
+def test_a_percussion_clef_keeps_the_positions_it_was_read_with():
+    """LilyPond's percussion clef puts middle C on the middle line; Audiveris
+    writes its display positions as a treble reader sees them.  Left alone, the
+    snare and bass drum land above the staff a step apart, where the page has
+    them four steps apart and inside it."""
+    from sheeets.engrave import _plain_staff
+
+    out = _plain_staff('    \\clef "percussion" c4 f,4\n')
+    assert '\\clef "percussion"' in out
+    assert "middleCPosition = #-6" in out
+    assert "middleCClefPosition = #-6" in out
