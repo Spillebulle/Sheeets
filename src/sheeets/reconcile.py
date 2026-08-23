@@ -217,24 +217,39 @@ def drop_what_the_page_denies(facts) -> list[str]:
 def _page_agrees(want: int, fact, slack: float = 0.2) -> bool:
     """Does the barline count support what the bar numbers claim?
 
-    A multi-measure rest is one bar of paper and many bars of music, so the two
-    are compared after the rests are taken into account: a system of nine
-    written bars, six of them rests totalling ninety-five, holds ninety-eight
-    bars, and the barlines should show nine.  Counting barlines is only an
-    estimate — it ran about three per cent over on a nineteen-stave score — so
-    the test is loose.  It is not there to check arithmetic; it is there to
-    catch a bar number read as something else entirely.
+    The test is deliberately **one-sided**, and getting that wrong cost a
+    timpani part seventy-three bars.  The first version worked out how many
+    bars the system ought to hold by adding up the multi-measure rest counts
+    that had been read off it, and compared that with the barlines.  But the
+    rest counts are the *unreliable* half — Audiveris drops the tens digit off
+    them, which is the fault the whole reconciliation exists to repair — so
+    the check was asking the suspect to vouch for the witness.  System 6 of
+    that part reads its rests as 44, 16, ?, 14, 34 and 3, which is at least a
+    hundred and eleven bars; the printed numbers say the system holds
+    ninety-eight; and the span was thrown out for disagreeing with counts
+    that were about to be corrected against it.
+
+    What the barlines *can* say is how much paper there is, and that only ever
+    puts a floor under the number of bars:
+
+    - fewer bars than the system has written barlines is impossible, whatever
+      the rests say, so a number that claims that is misread;
+    - more bars than the barlines is what a multi-measure rest is for, so it
+      is only suspicious where the system has **no** rest on it at all.
+
+    Counting barlines is itself an estimate — about three per cent over on a
+    nineteen-stave score — so both edges are given slack.  This is not here to
+    check arithmetic; `_fit_counts` does that, against the numbers.  It is
+    here to catch a bar number read as something else entirely.
     """
     if not fact.written:
         return False
-    if any(count is None for count in fact.rests):
-        hidden = 0                       # unknown; the rest of the sum decides
-        for count in fact.rests:
-            hidden += (count - 1) if count else 0
-        return want >= fact.written - len(fact.rests) + hidden
-    hidden = sum(count - 1 for count in fact.rests)
-    expected = want - hidden
-    return abs(expected - fact.written) <= max(2, slack * fact.written)
+    room = max(2, slack * fact.written)
+    if want < fact.written - room:
+        return False
+    if not fact.rests and want > fact.written + room:
+        return False
+    return True
 
 
 def numbers_are_worth_using(facts, share: float = 0.6, least: int = 3) -> bool:

@@ -222,6 +222,18 @@ def tidy_sequence(texts: list[str]) -> tuple[list[str], list[str], list[int]]:
         letters.append(expected)
         expected = chr(ord(expected) + 1)
 
+    # How much of this run was actually *read*, and how much was asserted?
+    # The outward reach above takes an unused item and declares it the next
+    # letter without looking at it, which is right when one box in a good run
+    # was misread and catastrophic when the boxes are mostly noise.  Measured
+    # on a publisher's timpani part with a generous box detector: twenty-six
+    # candidates, four letters read correctly, and this returned a confident
+    # A to Z.  A run that is mostly correction is not a reading of the page.
+    corrected = sum(1 for note in notes if note.endswith("corrected"))
+    if corrected * 3 > len(letters):
+        return [], notes + [f"only {len(letters) - corrected} of {len(letters)} "
+                            f"rehearsal letters could actually be read; the rest "
+                            f"would have been invented, so none are used"], []
     if letters[0] != "A":
         # Rehearsal letters begin at A.  A run that starts anywhere else is a
         # run of misreadings that happen to ascend, and placing it would put

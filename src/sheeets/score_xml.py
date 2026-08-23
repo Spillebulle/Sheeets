@@ -225,6 +225,39 @@ def add_rehearsal_marks(tree: ET.ElementTree, marks: list[tuple[int, str]]) -> i
     return added
 
 
+def add_words(tree: ET.ElementTree,
+              said: list[tuple[int, str, bool]]) -> int:
+    """Put an instrument change or a "solo" into a page's part.
+
+    Given (measure index, text, above).  A percussion part that says which
+    rhythms to play and not which drum to play them on is half a part, so
+    where `sheeets.words` can vouch for a reading it belongs in the music
+    rather than in a list of bars to go and look up.
+    """
+    part = tree.getroot().find("part")
+    if part is None:
+        return 0
+    measures = part.findall("measure")
+    added = 0
+    for index, text, above in said:
+        if not text or not 0 <= index < len(measures):
+            continue
+        measure = measures[index]
+        if any((w.text or "") == text for w in measure.iter("words")):
+            continue
+        direction = ET.Element("direction")
+        direction.set("placement", "above" if above else "below")
+        kind = ET.SubElement(direction, "direction-type")
+        node = ET.SubElement(kind, "words")
+        node.set("font-style", "italic")
+        node.text = text
+        attributes = measure.find("attributes")
+        at = list(measure).index(attributes) + 1 if attributes is not None else 0
+        measure.insert(at, direction)
+        added += 1
+    return added
+
+
 def set_titles(tree: ET.ElementTree, title: str = "", part_name: str = "",
                composer: str = "", part_abbreviation: str | None = "") -> ET.ElementTree:
     """Put the titling into the MusicXML, where musicxml2ly will find it.

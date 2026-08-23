@@ -72,6 +72,16 @@ Rules that keep it honest, and that must survive a refactor:
 - **Padding is for the numbering, not for the music.** Where bars cannot be
   recovered they go in as rests so that bar 300 is still bar 300, and they are
   named for proofreading. Never quietly.
+- **The barlines may only put a *floor* under a bar number.** They are the
+  independent witness that catches a number read as something else entirely,
+  and the first version of `_page_agrees` used them wrongly: it added up the
+  multi-measure rest counts read off the system and refused any bar number
+  that disagreed with the total. Those counts are the unreliable half — the
+  dropped tens digit is the whole reason this machinery exists — so it was
+  asking the suspect to vouch for the witness, and it silently cost a timpani
+  part seventy-three bars. What the paper can honestly say is that a system
+  cannot hold *fewer* bars than it has barlines, and cannot hold more unless
+  there is a multi-measure rest to hide them in.
 
 ## Shape
 
@@ -109,6 +119,22 @@ So: open the PDF. Render a page and read it before believing a change to the
 engraving helped. `NOTES.md` has the four faults and what each one turned out
 to be.
 
+**Then put it beside the scan.** Looking at the fresh part alone is already
+worth more than every number the run prints, and it is still not enough: the
+faults it cannot show are the ones where something on the page is simply
+*absent* from the output, because a page with nothing wrong on it looks fine.
+Setting the retyped timpani part next to page 2 of its scan, at the point
+where every count agreed and LilyPond had no complaint, showed two whole
+classes of loss at once — fifteen boxed rehearsal letters and every one of the
+part's trill signs. Neither is in any figure, and neither would ever have been
+found by looking at the output on its own.
+
+**And check what the engraver said.** `LilyPondEngraver.engrave` keeps the log
+and `Engraved.complaints()` reads it. A failed bar check means the barline grid
+is wrong from that point to the end of the part, and no count of measures can
+see it: the run that put a timpani part 915 pt wide on a 595 pt page printed
+402 measures, 402 bars, six flagged, and one line in a log nobody read.
+
 ## The fleet
 
 `FLEET.md` describes a set of real scans the pipeline is run over — a bound
@@ -141,7 +167,23 @@ only thing that catches it.
 - Taking the longest run of rehearsal letters as the right one. Loosening the
   box detector doubles what is found and the longest run gets *longer* — A to U
   on a piece with A to O. A run says what was read is real; it says nothing
-  about what else was invented. A run that does not begin at A is not placed.
+  about what else was invented. A run that does not begin at A is not placed,
+  and neither is one that is mostly *correction*: the chain reaches outwards
+  and declares each unused candidate the next letter without looking at it,
+  which is right for one misread box in a good run and catastrophic otherwise.
+  Measured with a generous detector on a publisher's part: twenty-six
+  candidates, four letters actually read, and a confident A to Z came back.
+- Reading a word off the page by asking what it says. Ask which of a known
+  list it is. Two- and three-letter abbreviations at this size are past
+  tesseract on their own — the first attempt got three answers out of
+  ninety-eight and two were rubbish — and the same crops read correctly once
+  the question is "S. Dr., B. Dr., Tri., … or none of them?", because the
+  closeness of the answer is then its own filter. Two things had to be right
+  as well: `--psm 7` alone (the earlier version voted three page-segmentation
+  modes against each other and the noisy one outvoted the right one), and one
+  vocabulary entry per instrument. "S. Dr." and "Bass Dr." are four characters
+  apart, and a misread `ff` in front of `S.Dr.` scores 0.91 against the wrong
+  drum.
 - Handing tesseract a tighter, cleaner, bigger crop. It does its own
   thresholding and layout work on what it is given. Isolating a rehearsal
   letter from its frame and enlarging it — both plausible, both measured, both

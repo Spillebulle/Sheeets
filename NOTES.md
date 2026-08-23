@@ -622,3 +622,128 @@ one: below one note in ten they are furniture.
 - **The last page of the book of parts.** Its header reads "cm RULE BRITANNIA”
   — nearmmans", with no legible player, so it is called "part 20". It may be a
   second percussion page rather than a part of its own.
+
+## Four faults that only the scan could show
+
+The retype had reached the point where every number it printed was healthy:
+402 measures against 403 bars on both Ruslan parts, LilyPond silent, the page
+fitting the paper. Put page 2 of the fresh timpani part beside page 2 of its
+scan and four things are wrong with it, none of which any figure could report.
+
+### An over-long bar poisons every bar after it, and two voices hid most of them
+
+The bar filler shortened a bar that ran past its barline, and refused to look
+at any bar holding a `<backup>` — which is every bar with two voices in it, 61
+of them on the percussion part. So on the part where it was needed most it
+repaired nothing, and from bar 36 the barline grid was off to the end.
+
+Working inside the voices found 113 over-long voices across the fleet where
+the old test found a handful. The order things are given back in is the whole
+design, least damaging first: the `<forward>` gaps written before a voice
+comes in (whitespace — shortening one moves a note), then the voice's trailing
+rests, then any other rest in it, and only then the notes at its end.
+
+That last step is capped at half a bar, and the cap is not caution for its own
+sake. Every voice in the fleet that overruns by more than half a bar is on a
+page where Audiveris printed no `<time>` of its own and the previous page's
+carried over; one of them is a bar of five quarters declared 3/8, another is
+138 divisions in a bar of 48. Deleting most of a bar to fit a meter that is
+itself misread is the worse of two bad answers. With the cap, 113 becomes 34,
+and the 34 are all reported as "the time signature is the more likely fault".
+
+Two smaller faults came out of the same measurement. A `<backup>` can step the
+cursor back past the start of the bar — Audiveris sizes one for the longest
+voice and writes it after every voice — which hides a shorter voice *behind*
+the barline where nothing can see it; only an overshoot is corrected, because
+a voice that genuinely comes in on beat three is written exactly that way. And
+a `<backup>` can be missing altogether: bar 182 of one part is two whole-bar
+rests, one per voice, written one after the other, so the second reads as
+starting on beat five.
+
+A thing not to repeat: a voice that is too **short** needs nothing done to it.
+musicxml2ly pads one with a skip of its own accord — `e4 e4 e4` in a 4/4 bar
+comes out `e4 e4 e4 s4` and the bar check passes. Nineteen bars of the
+percussion part have a short second voice and every one of them is fine.
+
+### The engraver knew, and nobody asked it
+
+`barcheck failed at: 1/16` had been in LilyPond's log for as long as the fault
+had existed. `Engraved.complaints()` reads the log now and the lines that mean
+the *music* is wrong — failed bar checks, an unterminated spanner, a
+programming error — go into the report's warnings. LilyPond is talkative about
+typography; none of that belongs there.
+
+### The barlines were vouching for the wrong witness
+
+The reconciliation lost the timpani part seventy-three bars, and the bisect
+put it on the commit that added the barline cross-check. `_page_agrees`
+computed how many bars a system ought to hold by **adding up the
+multi-measure rest counts read off it** and comparing that with the barlines.
+Those counts are the unreliable half — Audiveris drops the tens digit off
+them, which is the entire reason `reconcile.py` exists — so the check was
+asking the suspect to vouch for the witness. System 6 of that part reads its
+rests as 44, 16, ?, 14, 34 and 3, at least a hundred and eleven bars; the
+printed numbers say ninety-eight; and the span was thrown out for disagreeing
+with counts that were about to be corrected against it.
+
+The barlines can only put a **floor** under a bar number, and the test has to
+be one-sided: a system cannot hold fewer bars than it has printed barlines,
+and it can only hold more if there is a multi-measure rest to hide them in.
+
+### Words beside the staff: ask which, not what
+
+A percussion part that says which rhythms to play and not which drum is half a
+part, and `words.py` had measured that reading them was impossible: three
+answers out of ninety-eight runs of text, two of them rubbish. Both halves of
+that measurement were wrong in the same way — the question was open.
+
+Two changes make the same crops readable. Only `--psm 7`, tesseract's
+single-line mode, suits a two-word label; the earlier attempt voted three
+page-segmentation modes against each other and `--psm 13`, which returns noise
+at this size, outvoted the mode that was right. And the question becomes "is
+this one of two dozen things a part can be told to play, and which?", where
+the closeness of the answer is its own filter.
+
+Three settings each cost a real mistake before they were right:
+
+- **One entry per instrument.** "S. Dr." and "Bass Dr." are four characters
+  apart. A misread `ff` in front of `S.Dr.` gave `as S.Dr.,`, which scores
+  0.91 against *Bass Dr.* Matching word by word rather than whole-line fixes
+  that one; folding the spellings of one instrument into a single entry stops
+  the rest.
+- **Three characters, not two.** Two was chosen to rescue a "Tri." that read
+  as "Ti." — 0.80, and no junk in the sample reached it. The sample was one
+  part. On the *timpani* part the same setting put "T. Dr.", "B. Dr.", "Cym.",
+  "S. Dr.", "Tri.", "Vib." and "Xyl." onto a part that has none of them, every
+  one at exactly 0.80 off a two-letter read of something that is not a word:
+  `(tr)` — the trill sign — is four fifths of "Tri.". **A vocabulary tuned on
+  one part is not tuned.**
+- **A stop-list.** A closed vocabulary only works if it is closed on both
+  sides, so the nearest neighbour to a reading is allowed to be *nothing*:
+  `tr`, `cresc.`, `poco`, the tempo words.
+
+After all three: every correct naming in the measurement comes in at 1.00 and
+every wrong one at 0.80 or below, so the line sits above 0.80 rather than
+between. What the vocabulary cannot vouch for keeps the honest answer it
+always had — a position, mapped to a bar, in the list of markings the fresh
+part could not carry.
+
+### What is still missing from the fresh part
+
+Measured against the timpani scan, and worth knowing before the next attempt:
+
+- **Trills.** Audiveris returned zero `<trill-mark>` and zero `<wavy-line>`
+  from either page; the part has dozens. Nothing downstream can put back what
+  was never read.
+- **Rehearsal letters, on a part.** They work on the *score* — A to O, all
+  fifteen — and not on the publisher's part, where the boxes are small and
+  printed in grey. The box finder wants one connected component whose border
+  is inked at a threshold of 160; measured, no pixel of those frames is below
+  100 and most of the frame is above 160, so it finds 8 of 15 and reads 3 of
+  those. Scoring a hollow rectangle on **darkness** rather than on a threshold
+  finds more of them (J, K, M, N, O where the old test found only L) but the
+  candidate list is then mostly noise and the OCR of a 50-pixel letter is not
+  good enough to pick the real ones out. What that attempt did prove is that
+  `tidy_sequence` will fabricate: given twenty-six candidates of which four
+  read correctly, it returned a confident A to Z. It refuses a run that is
+  mostly correction now, and the count of unread boxes goes into the report.

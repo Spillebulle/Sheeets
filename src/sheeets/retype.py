@@ -259,7 +259,7 @@ def retype(
     # many bars each system holds.  Read before recognition because the count
     # is worth reporting whether or not an engine is any good.
     staff_of_page = staves_by_page(extraction)
-    unread = _markings_not_carried(extraction, staff_of_page)
+    words_of_page, unread = _read_markings(extraction, staff_of_page)
     if unread:
         say(f"{len(unread)} marking(s) printed around the staff — instrument "
             f"changes and the like — are not carried into the fresh part; the "
@@ -308,7 +308,7 @@ def retype(
     marks_of_page: dict[int, list[tuple[int, str]]] = {}
     if read_from == "score":
         if rehearsal_marks:
-            marks_of_page = _find_marks(extraction, say)
+            marks_of_page = _find_marks(extraction, say, warnings)
         images = _rasterise_source(source, sorted(staff_of_page), holder / "pages",
                                    dpi=omr_dpi)
     else:
@@ -358,6 +358,7 @@ def retype(
     read_pages: list[tuple[int, int]] = []
     grafted = 0
     lettered = 0
+    named = 0
     for page_index, produced_path in sorted(produced):  # back into playing order
         try:
             page_tree = score_xml.read(produced_path)
@@ -374,6 +375,9 @@ def retype(
                 found = marks_of_page.get(page_index)
                 if found:
                     lettered += _place_marks(tree, found)
+                said = words_of_page.get(page_index)
+                if said:
+                    named += _place_words(tree, said)
             trees.append(tree)
             read_pages.append((page_index, score_xml.count_measures(tree)))
         except Exception as exc:
@@ -385,6 +389,11 @@ def retype(
         say(f"{grafted} tempo marking(s) taken from the top staff")
     if lettered:
         say(f"{lettered} rehearsal mark(s) read off the score and added")
+    if named:
+        line = (f"{named} marking(s) beside the staff were read and put in — "
+                f"instrument changes and the like; check them against the scan")
+        say(line)
+        warnings.append(line)
 
     # 3. Join and count.
     tree = score_xml.merge_trees(trees, part_name=part_name or extraction.part_name)
@@ -475,7 +484,8 @@ def retype(
     return result
 
 
-def _find_marks(extraction: Extraction, say) -> dict[int, list[tuple[int, int, str]]]:
+def _find_marks(extraction: Extraction, say,
+                warnings: list[str]) -> dict[int, list[tuple[int, int, str]]]:
     """Rehearsal letters, read off the page by shape: page -> (system, bar, text).
 
     They are found on the page rather than in the recognised MusicXML because
@@ -507,9 +517,18 @@ def _find_marks(extraction: Extraction, say) -> dict[int, list[tuple[int, int, s
         say(f"rehearsal mark: {line}")
     if tidied:
         say("rehearsal marks: " + " ".join(tidied))
+    elif places:
+        # A silent loss is the worst kind.  A part with no rehearsal letters is
+        # close to useless at a rehearsal, so if the page plainly has boxes on
+        # it and none could be read, that belongs in the report and not only in
+        # the log — the person needs to know to write them in.
+        line = (f"{len(places)} boxed rehearsal mark(s) are printed on the page and "
+                f"none could be read with confidence; the fresh part carries none "
+                f"— write them in by hand")
+        say(line)
+        warnings.append(line)
     else:
-        say("rehearsal marks: none could be read with confidence; "
-            "the fresh part carries none — put them in by hand")
+        say("rehearsal marks: none found on the page")
     return _by_page(places, tidied, kept)
 
 
@@ -602,25 +621,50 @@ def _brief(exc: Exception) -> str:
     return text[-1][:200] if text else exc.__class__.__name__
 
 
-def _markings_not_carried(extraction: Extraction, staff_of_page) -> list[int]:
-    """Which bars have something written beside the staff that the retype drops.
+def _read_markings(extraction: Extraction, staff_of_page):
+    """What is written beside the staff: named where it can be, placed where it
+    cannot.  Returns (page -> [(system, bar, text, above)], bars still missing).
 
-    Recognition does not read these, and neither does `sheeets.words` — the
-    measurement for why not is in that module.  What can honestly be said is
-    *where* they are, and that is worth saying: it is the difference between a
-    part the player must check against the original everywhere and one where
-    they know the dozen bars to look at.
+    Recognition does not read these at all — Audiveris returned one word,
+    "Presto", from twenty-seven pages of a nineteen-stave score.  What
+    `sheeets.words` can vouch for goes into the music; the rest keeps the
+    honest answer it has always had, which is *where* it is.  That is the
+    difference between a part the player must check against the original
+    everywhere and one where they know the dozen bars to look at.
     """
+    named: dict[int, list[tuple[int, int, str, bool]]] = {}
     at: set[int] = set()
     before = 0
     for page in extraction.detected:
         index = staff_of_page.get(page.page.index, -1)
-        for system in page.systems:
+        for system_index, system in enumerate(page.systems):
             if not system.staves:
                 continue
             staff = system.staves[index if 0 <= index < len(system.staves) else -1]
             columns = system_barlines(page, system)
-            for marking in words.find(page.image, staff):
-                at.add(before + sum(1 for c in columns if c < marking.x) + 1)
+            found = words.read(page.image, words.find(page.image, staff),
+                               staff.space)
+            for marking in found:
+                bar = sum(1 for column in columns if column < marking.x)
+                if marking.text:
+                    named.setdefault(page.page.index, []).append(
+                        (system_index, bar, marking.text, marking.above))
+                else:
+                    at.add(before + bar + 1)
             before += max(1, len(columns))
-    return sorted(at)
+    return named, sorted(at)
+
+
+def _place_words(tree, said: list[tuple[int, int, str, bool]]) -> int:
+    """Turn (system, bar) places into measure numbers and write the words in."""
+    spans = score_xml.systems_of(tree)
+    placed: list[tuple[int, str, bool]] = []
+    for system_index, bar, text, above in said:
+        if system_index >= len(spans):
+            continue
+        printed = score_xml.written_bars(tree, spans[system_index])
+        if not printed:
+            continue
+        index = printed[min(bar, len(printed) - 1)][0]
+        placed.append((index, text, above))
+    return score_xml.add_words(tree, placed)

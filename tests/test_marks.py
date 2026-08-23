@@ -137,3 +137,92 @@ def test_what_is_not_a_run_of_letters_is_not_used():
     # A run that ascends but does not begin at A is a run of misreadings.
     got, notes, kept = tidy_sequence(["O", "H", "F", "G", "H", "I", "J", "K"])
     assert got == [] and kept == [] and notes
+
+
+def test_a_run_that_is_mostly_invented_is_refused():
+    """The chain reaches outwards from the letters it matched and declares
+    each unused item the next letter, without looking at it.  That is right
+    when one box in a good run was misread; it is catastrophic when the boxes
+    are mostly noise.  Measured on a publisher's timpani part with a generous
+    box detector: twenty-six candidates, four of them read as the letter they
+    show, and a confident A to Z came back."""
+    from sheeets.marks import tidy_sequence
+
+    junk = ['1', '7', '7', 'A', 'L', 'B', 'E', 'C', 'C', 'U', 'S', 'O', 'A', 'H',
+            'L', 'J', 'L', '1', 'J', 'H', 'C', '7', 'A', 'M', 'L', 'N', 'T', '7',
+            'U', '0', 'L', 'SS']
+    letters, notes, kept = tidy_sequence(junk)
+    assert letters == []
+    assert kept == []
+    assert "would have been invented" in notes[-1]
+
+
+def test_one_misread_letter_in_a_good_run_is_still_corrected():
+    """The guard must not throw away the case it was written for."""
+    from sheeets.marks import tidy_sequence
+
+    assert tidy_sequence(['A', 'B', 'G', 'D', 'E', 'F', 'G', 'H'])[0] == list("ABCDEFGH")
+
+
+def test_a_marking_is_named_only_when_the_vocabulary_can_vouch_for_it():
+    """The reader answers "which of these two dozen known markings is this",
+    which is a far easier question than "what does this say" — and the
+    closeness of the answer is itself the filter.  These readings are the ones
+    tesseract actually returned from a score page, junk included."""
+    from sheeets.words import LIKENESS, likeness
+
+    for text, want in (("+C. Cym.", "C. Cym."), ("Tri.", "Tri."), ("solo", "solo")):
+        name, score = likeness(text)
+        assert score >= LIKENESS and name == want, (text, name, score)
+    for junk in ("af", "Ss", "we", "@-", "5 as", "ee", "ll", "rt", "na", "oy"):
+        name, score = likeness(junk)
+        assert not (name and score >= LIKENESS), (junk, name, score)
+
+
+def test_a_trill_sign_is_not_a_triangle():
+    """Every false naming on the timpani part came in at exactly 0.80 off a
+    two-letter read of something that is not a word: "(tr)" — the trill — is
+    four fifths of "Tri.", and a stem beside a hairpin reads as "BD" and "cy".
+    A part that names the wrong drum is worse than one that names none, and
+    for one afternoon this shipped seven of them onto a timpani part."""
+    from sheeets.words import LIKENESS, likeness
+
+    for junk in ("(tr)", "BD |", "cy |", "Xl |", "1Vi |", "SD eel", "mm ti,"):
+        name, score = likeness(junk)
+        assert not (name and score >= LIKENESS), (junk, name, score)
+
+
+def test_a_tempo_or_a_hairpin_word_names_nothing():
+    """A closed vocabulary only works if it is closed on both sides: the
+    nearest neighbour to a reading has to be allowed to be nothing."""
+    from sheeets.words import LIKENESS, likeness
+
+    for word in ("cresc.", "Presto", "poco", "dim.", "8va"):
+        name, score = likeness(word)
+        assert name == "", (word, name, score)
+
+
+def test_a_dynamic_swept_in_beside_a_label_does_not_rename_the_drum():
+    """Measured on a real page: a misread "ff" in front of "S.Dr." gave
+    "as S.Dr.,", which read whole is closest to "Bass Dr." at 0.91 — the wrong
+    drum, printed with confidence.  Matching word by word gets it right."""
+    from sheeets.words import likeness
+
+    assert likeness("as S.Dr.,") == ("S. Dr.", 1.0)
+
+
+def test_the_words_go_into_the_music_where_they_are_named():
+    import xml.etree.ElementTree as ET
+
+    from sheeets.score_xml import add_words
+
+    root = ET.Element("score-partwise")
+    part = ET.SubElement(root, "part")
+    for number in (1, 2):
+        ET.SubElement(part, "measure").set("number", str(number))
+    assert add_words(ET.ElementTree(root), [(1, "Tri.", True)]) == 1
+    words = list(part.findall("measure")[1].iter("words"))
+    assert [w.text for w in words] == ["Tri."]
+    assert part.findall("measure")[1].find("direction").get("placement") == "above"
+    # and not twice, however many times it is offered
+    assert add_words(ET.ElementTree(root), [(1, "Tri.", True)]) == 0

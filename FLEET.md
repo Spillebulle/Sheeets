@@ -99,6 +99,25 @@ these cases it is itself unreliable — see `reflow.system_barlines`. Where a
 page numbers its systems the two columns are an honest cross-check; where it
 does not, only the left one means anything.
 
+**What the table cannot show, and what the fleet is for anyway.** Every figure
+above was healthy on the day the fresh timpani part ran off the side of the
+paper, and healthy again while it silently lost seventy-three bars. Two of
+the four faults found by putting the output beside the scan were caught by
+running the fleet *afterwards*, and neither would have been caught by the
+numbers alone:
+
+- **Over-long bars, counted per voice.** 113 across the fleet where the old
+  test found a handful, because it refused any bar with a second voice in it.
+  Repairing them takes the count to 34, and the 34 that remain are all bars
+  whose *time signature* is the likelier fault — pages where Audiveris printed
+  no `<time>` and the previous page's carried over.
+- **A vocabulary tuned on one case is not tuned.** Reading the words beside
+  the staff was measured on the percussion part, where it named four markings
+  correctly and invented none. Run over the timpani part it put seven drums
+  onto a part that has none of them. The fleet is where "it works" turns into
+  "it works on more than the case I was looking at", and this is the clearest
+  example yet: one case said ship it, two cases said the setting was wrong.
+
 Three things that column tells you and no average would:
 
 - **A crooked scan is not a hard case.** Skew is measured and corrected, and
