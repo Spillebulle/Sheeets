@@ -40,18 +40,27 @@ its numbers justify, it is the wrong change.
 
 ## A part carries evidence a score does not
 
-When the source is a *part* — one staff to a system — the page prints its own
-answer key: a bar number over every system after the first, and a count over
-every multi-measure rest. `barnum.py` reads both, and `retype._reconcile` makes
-the recognition agree with them. This is the only outside check the retype
-half has, and it caught a failure nothing internal could: a 401-bar timpani
-part recognised as 255 measures, every measure of it well formed.
+A page prints its own answer key: a bar number over every system after the
+first, and a count over every multi-measure rest. `barnum.py` reads both and
+`reconcile.py` makes the recognition agree with them. This is the only outside
+check the retype half has, and it caught a failure nothing internal could: a
+401-bar timpani part recognised as 255 measures, every measure of it well
+formed.
 
 Rules that keep it honest, and that must survive a refactor:
 
-- **Read it only where it belongs.** The numbers above the top staff of a
-  *score* system are the top instrument's, not the part's. `_is_a_part` gates
-  the whole thing on every system having exactly one staff.
+- **A bar number belongs to the system; a rest count belongs to a staff.**
+  That distinction is the whole reason this works on a score and not only on a
+  part. The number printed above the top staff counts the same bars for the
+  percussion at the bottom as for the cornets at the top, so it is read there
+  and used for any staff. The multi-measure rests are read on the staff being
+  extracted (`reconcile.staves_by_page`) — read them off the top of a score and
+  they are the first instrument's.
+- **Nothing is used unless it is a *run*.** `numbers_are_worth_using` wants
+  most systems to carry a number; `choose` takes the longest ascending
+  selection; `drop_what_the_page_denies` throws out any number that makes
+  nonsense of the systems either side of it. A misread number is a plausible
+  number in the wrong place and it spoils *two* spans, not one.
 - **Arithmetic before OCR.** Once the printed bars are counted, the total of a
   system's rests is forced by the bar numbers. One unreadable count is solved
   for; one wrong count is corrected only if a single change fixes the sum *and*
@@ -138,22 +147,55 @@ only thing that catches it.
   letter from its frame and enlarging it — both plausible, both measured, both
   broke a run that the plain crop reads correctly. The same enlargement is
   what *fixed* the rest counts. Measure per case; do not generalise.
-- Believing a barline count. It made 414 of a 401-bar part. Where the page
-  prints bar numbers, they are the count.
+- Believing a barline count, or checking the printed numbers against one. On a
+  part there is no second staff to vote, so a stem crossing the staff counts as
+  a barline: the estimate is within a fifth on five of the ten fleet cases and
+  **518 against 68** on a tightly written drum-kit part. Two ways of filtering
+  those stems out were measured and both are recorded as rejected in
+  `reflow.system_barlines` — each fixes the dense cases and destroys the
+  photocopies, where nothing has clear paper beside it. Where a page numbers
+  its systems, those numbers win outright; the barline count is a fallback and
+  is labelled an estimate when reported.
 
 ## Commands
 
 ```console
 pip install -e .[dev]
-python -m pytest                                    # 125 tests, no score needed
-sheeets engines                                     # what is installed here
-sheeets inspect score.pdf --pages 3- --overlay out/ # what is on the page
+python -m pytest                                     # 125 tests, no score needed
+python -m pytest tests/test_barnum.py                # one file
+python -m pytest tests/test_reflow.py::test_a_one_staff_system_still_has_barlines
+python -m pytest -k "barline or rehearsal"           # by name
+
+sheeets engines                                      # what is installed here
+sheeets inspect score.pdf --pages 3 --overlay out/   # which staff is which
 sheeets extract score.pdf --part bottom -o part.pdf
 sheeets retype  score.pdf --part bottom -o fresh.pdf --workdir work/ --reuse
+sheeets parts   book.pdf -o parts/                   # split a book by part
 ```
 
-`retype` needs two outside programs, neither bundled: an OMR engine (Audiveris
-5.6.3 is much the better of the two wired up; it needs Java 21, and master
-needs Java 25, so build the tag) and LilyPond for the engraving. Always pass
-`--workdir` and `--reuse` while working on the joining, checking or engraving
-stages — recognition is the slow part and re-doing it wastes an hour.
+`--part` takes `bottom`, `top`, an index (`-1`, `17`), a range (`17..18`),
+`all`, or `name:Timpani`. The entry point is `sheeets` (`pyproject.toml`
+`[project.scripts]`); `python -m sheeets.cli` is the same thing and is what to
+use from a checkout that is not installed.
+
+**What has to be on PATH.** `lilypond` and `musicxml2ly` for the engraving, and
+an OMR engine found by environment variable — `SHEEETS_AUDIVERIS`,
+`SHEEETS_OEMER`, or a template in `SHEEETS_OMR_COMMAND`. Audiveris is much the
+better of the two and takes a build: it needs Java 21 where master needs Java
+25, so build the 5.6.3 tag, and it wants `TESSDATA_PREFIX` pointing at a
+tessdata directory with the **legacy** `eng.traineddata` (Ubuntu ships
+LSTM-only). `tesseract` itself is called directly — not through `pytesseract` —
+for the instrument labels, the rehearsal letters and the bar numbers, so
+without it those three go quiet rather than failing.
+
+Always pass `--workdir` and `--reuse` while working on the joining, checking or
+engraving stages: recognition is the slow part (Audiveris is minutes a page)
+and re-doing it wastes an hour. In score mode the cache is per *page*, so a
+second part from the same score costs nothing.
+
+For the fleet, `--only` is the fast loop:
+
+```console
+python tools/fleet.py --manifest ~/sheeets-fleet/fleet.json                 # geometry, ~4 min
+python tools/fleet.py --manifest ~/sheeets-fleet/fleet.json --only castell --retype
+```
