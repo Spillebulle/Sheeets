@@ -200,6 +200,7 @@ def _with_layout(source: str, staff_size: float, paper: str, landscape: bool,
     if systems:
         block.append(f"    system-count = {systems}")
     block.append("}")
+    source = _plain_staff(source)
     source = _with_rest_shape(source)
     match = re.search(r'^\\version\s+"[^"]+"\s*$', source, flags=re.M)
     if not match:
@@ -220,6 +221,31 @@ _REST_SHAPE = """
         %% A rehearsal letter is printed in a box on the score it came from,
         %% and a player looks for the box rather than for the letter.
         \\override RehearsalMark.stencil = #(make-stencil-boxer 0.1 0.6 ly:text-interface::print)"""
+
+
+def _plain_staff(source: str) -> str:
+    """Take the part off LilyPond's DrumStaff and put it on an ordinary one.
+
+    A part of unpitched noteheads makes musicxml2ly write `\\new DrumStaff` and
+    `\\context DrumVoice` — and then fill them with ordinary pitches, because
+    that is all the MusicXML holds.  A DrumStaff places notes by looking their
+    *drum name* up in `drumStyleTable`; handed `f4` and `c'4` it has nothing to
+    look up, so it puts them wherever it likes.  On the percussion part that
+    meant the snare drum and the bass drum, which the scan prints on different
+    lines, came out on the **same line** from bar 19 to the end.
+
+    An ordinary Staff places a note by its pitch, which is exactly what
+    Audiveris gives us: it reads *where on the staff* a notehead sits, not which
+    drum it is.  The clef is already in the music (`\\clef "percussion"`), so
+    the whole repair is the context name.
+    """
+    for was, now in (("\\new DrumStaff", "\\new Staff"),
+                     ("\\context DrumStaff", "\\context Staff"),
+                     ("\\set DrumStaff.", "\\set Staff."),
+                     ("\\context DrumVoice", "\\context Voice"),
+                     ("\\new DrumVoice", "\\new Voice")):
+        source = source.replace(was, now)
+    return source
 
 
 def _with_rest_shape(source: str) -> str:

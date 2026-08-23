@@ -67,3 +67,21 @@ def test_get_recognizer_ignores_one_that_is_not_installed(monkeypatch):
     assert get_recognizer() is None
     monkeypatch.delenv("SHEEETS_OMR_COMMAND")
     assert get_recognizer("external") is None
+
+
+def test_a_percussion_part_is_not_put_on_a_drum_staff():
+    """musicxml2ly writes \\new DrumStaff for unpitched music and then fills it
+    with ordinary pitches.  A DrumStaff places a note by looking its drum name
+    up, so handed a pitch it has nothing to look up — the snare and the bass
+    drum came out on the same line from bar 19 to the end of the part."""
+    from sheeets.engrave import _plain_staff
+
+    source = (
+        '\\new DrumStaff\n<<\n  \\set DrumStaff.instrumentName = "Perc"\n'
+        '  \\context DrumStaff <<\n'
+        '    \\context DrumVoice = "One" { \\voiceOne \\PartOne }\n  >>\n>>\n'
+    )
+    out = _plain_staff(source)
+    assert "DrumStaff" not in out and "DrumVoice" not in out
+    assert "\\new Staff" in out and '\\set Staff.instrumentName = "Perc"' in out
+    assert '\\context Voice = "One"' in out

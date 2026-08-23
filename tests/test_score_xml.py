@@ -528,3 +528,53 @@ def test_a_tie_is_never_touched():
     ET.SubElement(notations, "tied").set("type", "start")
     assert close_the_spanners(ET.ElementTree(root)) == []
     assert len(list(part.iter("tied"))) == 1
+
+
+def test_a_slur_that_changes_voice_is_not_a_slur():
+    """Where the scan has a chord of two unpitched notes tied over the barline,
+    Audiveris reads one tie correctly and the other as a slur from the upper
+    voice to the lower.  LilyPond draws that as a bow across half a system."""
+    import xml.etree.ElementTree as ET
+
+    from sheeets.score_xml import close_the_spanners
+
+    root = ET.Element("score-partwise")
+    part = ET.SubElement(root, "part")
+
+    def note(measure, voice, slur=None):
+        n = ET.SubElement(measure, "note")
+        ET.SubElement(n, "duration").text = "4"
+        ET.SubElement(n, "voice").text = voice
+        if slur:
+            element = ET.SubElement(ET.SubElement(n, "notations"), "slur")
+            element.set("type", slur)
+            element.set("number", "1")
+        return n
+
+    one = ET.SubElement(part, "measure"); one.set("number", "71")
+    two = ET.SubElement(part, "measure"); two.set("number", "72")
+    note(one, "1", "start")
+    note(two, "2", "stop")
+    notes = close_the_spanners(ET.ElementTree(root))
+    assert notes and "voice 1 to voice 2" in notes[0]
+    assert not list(part.iter("slur"))
+
+
+def test_a_slur_inside_one_voice_survives():
+    import xml.etree.ElementTree as ET
+
+    from sheeets.score_xml import close_the_spanners
+
+    root = ET.Element("score-partwise")
+    part = ET.SubElement(root, "part")
+    for number, kind in (("1", "start"), ("2", "stop")):
+        measure = ET.SubElement(part, "measure")
+        measure.set("number", number)
+        n = ET.SubElement(measure, "note")
+        ET.SubElement(n, "duration").text = "4"
+        ET.SubElement(n, "voice").text = "1"
+        element = ET.SubElement(ET.SubElement(n, "notations"), "slur")
+        element.set("type", kind)
+        element.set("number", "1")
+    assert close_the_spanners(ET.ElementTree(root)) == []
+    assert len(list(part.iter("slur"))) == 2

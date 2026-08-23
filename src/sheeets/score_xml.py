@@ -1141,60 +1141,93 @@ _SPANNERS = {
 
 
 def close_the_spanners(tree: ET.ElementTree) -> list[str]:
-    """Throw away every mark that is drawn from a start to a stop and has one.
+    """Throw away every drawn-from-here-to-there mark that cannot be what it says.
 
-    A slur, a tie and a hairpin are each written as two events, and recognition
-    loses one of them often — a smudged hairpin tip, a tie whose second note
-    was read as something else.  What is left is not a small error: an
-    unterminated spanner is drawn **to the end of the piece**.  On the
-    percussion part a crescendo opened at bar 50 and was still widening at bar
-    402, across nine systems and two pages, over music that is marked nothing
-    of the kind.
+    Two things go, and they are different faults.
 
-    Nothing here can know where the mark was meant to end, and guessing would
-    put a crescendo somewhere the composer did not. So the orphan is removed
-    and reported. A start with no stop, and a stop with no start, both go: a
-    stray stop makes musicxml2ly drop the one before it instead.
+    **A mark with only one end.** A slur, a hairpin and a pedal are each written
+    as two events, and recognition loses one of them often — a smudged hairpin
+    tip, a tie whose second note was read as something else. What is left is not
+    a small error: an unterminated spanner is drawn **to the end of the piece**.
+    On the percussion part a crescendo opened at bar 50 and was still widening
+    at bar 402, across nine systems and two pages, over music marked nothing of
+    the kind.
+
+    **A slur that changes voice.** A slur belongs to one voice; that is what a
+    slur is. Where the scan has a *chord* of two unpitched notes tied over the
+    barline — a snare and a bass drum struck together and rolled — Audiveris
+    reads one of the two ties correctly and the other as a slur running from the
+    upper voice to the lower one. LilyPond then draws an arc between two notes
+    that are not in the same line of music, which comes out as a bow across half
+    a system. Six of them on this part, at bars 71, 75, 76, 288 and 401.
+
+    Nothing here can know where a lost end was meant to be, and guessing would
+    put a crescendo where the composer did not, so the orphan is removed and
+    reported. A stop with no start goes too: musicxml2ly answers a stray stop by
+    ending the mark before it instead.
     """
     part = tree.getroot().find("part")
     if part is None:
         return []
-    open_at: dict[tuple[str, str], tuple[ET.Element, ET.Element, str]] = {}
-    orphans: list[tuple[ET.Element, ET.Element, str, str]] = []
+    parent = {child: holder for holder in tree.getroot().iter() for child in holder}
+
+    def voice_of(element: ET.Element) -> str | None:
+        """The voice of the note this mark hangs on, if it hangs on one."""
+        node = element
+        while node is not None:
+            if node.tag == "note":
+                return node.findtext("voice")
+            node = parent.get(node)
+        return None
+
+    open_at: dict[tuple[str, str], tuple[ET.Element, str, str | None]] = {}
+    doomed: list[tuple[ET.Element, str, str]] = []
     for measure in part.findall("measure"):
         number = measure.get("number") or "?"
-        for holder in measure.iter():
-            for element in list(holder):
-                starts_with, stops_with = _SPANNERS.get(element.tag, (None, None))
-                if starts_with is None:
+        for element in measure.iter():
+            starts_with, stops_with = _SPANNERS.get(element.tag, (None, None))
+            if starts_with is None:
+                continue
+            if element.tag == "slur" and element.get("number") is None:
+                continue              # unnumbered slurs cannot be told apart
+            kind = element.get("type")
+            key = (element.tag, element.get("number", "1"))
+            if kind == stops_with:
+                if key not in open_at:
+                    doomed.append((element, number, "a stop with no start"))
                     continue
-                kind = element.get("type")
-                if element.tag == "slur" and element.get("number") is None:
-                    continue          # unnumbered slurs cannot be told apart
-                key = (element.tag, element.get("number", "1"))
-                if kind == stops_with:
-                    if key in open_at:
-                        del open_at[key]
-                    else:
-                        orphans.append((holder, element, number, "a stop with no start"))
-                elif kind == starts_with or (
-                    isinstance(starts_with, tuple) and kind in starts_with
-                ):
-                    if key in open_at:            # a start over a start
-                        was_holder, was, was_at = open_at[key]
-                        orphans.append((was_holder, was, was_at, "never stopped"))
-                    open_at[key] = (holder, element, number)
-    for holder, element, number in open_at.values():
-        orphans.append((holder, element, number, "never stopped"))
+                was, was_at, was_voice = open_at.pop(key)
+                here = voice_of(element)
+                if element.tag == "slur" and was_voice and here and was_voice != here:
+                    why = (f"a slur from voice {was_voice} to voice {here}, which is "
+                           f"not a slur — a chord's second tie read as one")
+                    doomed.append((was, was_at, why))
+                    doomed.append((element, number, why))
+            elif kind == starts_with or (
+                isinstance(starts_with, tuple) and kind in starts_with
+            ):
+                if key in open_at:                # a start over a start
+                    was, was_at, _ = open_at[key]
+                    doomed.append((was, was_at, "never stopped"))
+                open_at[key] = (element, number, voice_of(element))
+    for element, number, _voice in open_at.values():
+        doomed.append((element, number, "never stopped"))
 
     notes: list[str] = []
-    for holder, element, number, why in orphans:
+    said: set[str] = set()
+    for element, number, why in doomed:
+        holder = parent.get(element)
+        if holder is None:
+            continue
         try:
             holder.remove(element)
-        except ValueError:                        # already gone with its parent
+        except ValueError:
             continue
-        notes.append(f"measure {number}: a {element.tag} {why}; removed rather than "
-                     f"drawn to the end of the piece")
+        line = (f"measure {number}: a {element.tag} — {why}; removed rather than "
+                f"drawn across music that has none")
+        if line not in said:
+            said.add(line)
+            notes.append(line)
     _drop_empty_directions(part)
     return notes
 
