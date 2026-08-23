@@ -6,9 +6,38 @@ Guidance for Claude Code working in this repository.
 
 Sheeets takes a scanned score and writes out one part as its own sheet music.
 `README.md` says how to use it; `NOTES.md` is the engineering log — every
-threshold in the code has a measurement behind it there, and four of them exist
+threshold in the code has a measurement behind it there, and most of them exist
 because something plausible was wrong. Read `NOTES.md` before changing a number
 in `detect/`, `crop.py` or `reflow.py`.
+
+## Where this is up to
+
+**Both halves run end to end on ten real scans, and the honest summary is that
+`extract` works and `retype` varies enormously with the paper.**
+
+`extract` — cut a staff out of a scan and lay it out as a part — is the settled
+half. It is verified against a bound nineteen-stave score, a photograph, a
+photocopy of a photocopy, and a book of thirty-two pages holding twenty parts.
+
+`retype` — recognise the music and set it again — produces a PDF on all ten,
+and that is the *only* thing true of all ten. On the two Ruslan parts it is
+close to usable: 402 measures against the 403 the pages number themselves,
+LilyPond's bar check clean, rehearsal letters in, page fits the paper. On the
+worst photocopy it reads 28 bars of about 104. The spread is the fact, and
+`FLEET.md` keeps the table.
+
+What a fresh part now carries beyond the notes: multi-measure rests drawn as
+one numbered bar, dynamics, `solo`, rehearsal letters where their bar is known,
+and instrument changes where a closed vocabulary can vouch for the reading.
+What it does not carry: **trills** (Audiveris returns no `<trill-mark>` and no
+`<wavy-line>` at all — nothing downstream can restore what was never read), and
+anything else printed beside the staff that the vocabulary cannot name, which
+is reported as a list of bars to check rather than dropped silently.
+
+The current open faults are the last section of `NOTES.md`. The two that matter
+most: the timpani part's system 6, where the page's rests of 4/16/24/14/34/3
+come out as one 73-bar lump because six different single corrections fit the
+arithmetic equally well; and the trills.
 
 ## The rule this project turns on
 
@@ -99,7 +128,9 @@ Rules that keep it honest, and that must survive a refactor:
 
 ## Shape
 
-Stages are independent and registered, and that is worth protecting:
+Roughly 7,600 lines of Python under `src/sheeets/`, 2,400 of tests, no score
+in the repository. Stages are independent and registered, and that is worth
+protecting:
 
 - `sources.py` → `detect/` → `layout.py` → `select.py` → `crop.py` →
   `reflow.py` → `export/`, wired only in `pipeline.py`.
@@ -149,6 +180,67 @@ is wrong from that point to the end of the part, and no count of measures can
 see it: the run that put a timpani part 915 pt wide on a 595 pt page printed
 402 measures, 402 bars, six flagged, and one line in a log nobody read.
 
+## The test suite
+
+**162 tests, no score and no OMR engine needed, about 19 seconds.** They are
+the fast half of the safety net; the fleet (next section) is the slow half, and
+neither substitutes for the other. Every test here is named as a sentence about
+the behaviour, and where a test exists because something was measured and found
+wrong, its docstring carries the measurement — those docstrings are the reason
+to read a test rather than skim it.
+
+```console
+pip install -e .[dev]
+python -m pytest                    # all 162
+python -m pytest tests/test_marks.py
+python -m pytest tests/test_reflow.py::test_a_one_staff_system_still_has_barlines
+python -m pytest -k "barline or rehearsal"
+```
+
+**Where the pages come from.** No real music is committed — it is somebody's
+copyright and it is megabytes. `tools/make_fixture.py` *draws* a page instead:
+evenly spaced staves, barlines, note-shaped ink, optionally tilted by a known
+angle so the deskew can be checked against a number rather than an impression.
+`tests/conftest.py` puts that on the path and exposes it as fixtures
+(`score_pdf`, `page_image`, `expected_tops`). Tests that need MusicXML build
+the tree with `ElementTree` in the test itself, shaped the way Audiveris
+actually writes one.
+
+| file | tests | what it holds down |
+|---|---|---|
+| `test_detect.py` | 8 | Staff finding: long horizontal runs, Otsu, deskew against a known angle, a line broken into fragments, and a staff recovered where the grid says one belongs — plus that nothing is *invented* where the grid is already even. |
+| `test_layout.py` | 9 | Grouping staves into systems. The three signals — a barline joining two staves, equal group sizes, the gap between them — each get a case that the other two get wrong. |
+| `test_crop.py` | 5 | The band around a staff: keep the markings, leave the page furniture. |
+| `test_select.py` | 9 | `--part`: `bottom`, `top`, an index, a range, `all`, `name:`. Includes the OCR'd-name matching and the sticky staff memory that stops nineteen labels being read on all 27 pages. |
+| `test_reflow.py` | 12 | Cutting a system into page-width pieces. Barlines vs stems, never cutting mid-bar, a faint barline, a one-staff system, and not slicing through something printed over the barline. |
+| `test_pipeline.py` | 8 | The extract path end to end on a drawn page, plus the manifest round-trip and that a missing part is a warning and not a crash. |
+| `test_cli.py` | 4 | `inspect` and `extract` from the command line, including the overlay. |
+| `test_book.py` | 8 | Splitting a book of parts by its page headers, using headers as OCR really returned them. |
+| `test_recognize.py` | 6 | The recognition *seam*. No engine ships here, so what is tested is the registry, the protocol and the wiring. |
+| `test_barnum.py` | 5 | Reading the page's own bar numbers and multi-measure rest counts, and `bars_wanted` arithmetic over them. |
+| `test_reconcile.py` | 9 | Which witness is believed where — the printed numbers or the barline count — and the two placement guards. Getting this backwards silently drops bars out of the middle of a part, which is exactly what it did once. |
+| `test_marks.py` | 23 | Rehearsal boxes and the words beside the staff: finding a box by its four strokes, keeping one whose letter cannot be read, the sequence logic, and the vocabulary matcher with the junk readings that broke it. |
+| `test_score_xml.py` | 45 | The biggest file, and the part of retyping that needs no engine at all: joining pages, checking every bar against its time signature, multi-measure rests, spanners, voices, over-long bars, note naming, and LilyPond's own complaints. |
+| `test_retype.py` | 11 | The retype wiring: a page counted, joined, checked and reported, and the result telling the truth about how much of it to trust. |
+
+**Two conventions worth keeping.** A test name is a claim in English —
+`test_a_trill_sign_is_not_a_triangle`,
+`test_a_missed_box_does_not_overwrite_the_letter_beside_it`,
+`test_a_slur_that_changes_voice_is_not_a_slur` — so a failure reads as a
+sentence about what broke. And when a guess turns out wrong, the test that
+pins the correction records **what was measured**, not just the expected value:
+`test_a_naming_carried_by_one_reading_alone_is_dropped` says which of
+thirty-three namings was wrong and why it was the only single-vote one. Those
+notes are what stop the next session re-making the same mistake, and several
+already have.
+
+**What the suite cannot tell you.** It draws its own pages, so they are upright,
+evenly printed and complete, which is exactly what real paper is not. It has no
+OMR engine and no LilyPond in the loop, so nothing here proves the output is
+*musically* right. Every fault in the "Look at the PDF" section above passed the
+whole suite. Green tests mean nothing was broken; they never mean the part is
+good.
+
 ## The fleet
 
 `FLEET.md` describes a set of real scans the pipeline is run over — a bound
@@ -158,10 +250,23 @@ copyright and is never committed**; the manifest and the PDFs live outside the
 repository and `tools/fleet.py` is pointed at them.
 
 Run it before and after any change to `detect/`, `layout.py`, `crop.py` or
-`reflow.py`. Six real faults came out of it that no synthetic page showed, and
-they are listed in NOTES.md. A change that improves one case and quietly ruins
-another is the normal failure mode here, and the fleet's change column is the
-only thing that catches it.
+`reflow.py` — and, since the retype half started making claims about the music,
+before and after anything in `reconcile.py`, `marks.py`, `words.py` or
+`score_xml.py` too. A change that improves one case and quietly ruins another
+is the normal failure mode here, and the fleet's change column is the only
+thing that catches it.
+
+It has earned that twice over recently. A vocabulary for the words beside the
+staff was tuned on the percussion part, where it named four markings correctly
+and invented none; run over the *timpani* part it put seven drums onto a part
+that has none of them. And the voice-aware bar repair looked finished at 113
+over-long voices fixed until the fleet showed that 34 of them were bars whose
+*time signature* was the real fault. One case says ship it; two cases say what
+the setting should be.
+
+`--retype` over all ten is 25–40 minutes with Audiveris. `--only <name>` is the
+loop to work in; the geometry-only run (no `--retype`) is about four minutes and
+is enough for anything in `detect/`, `layout.py`, `crop.py` or `reflow.py`.
 
 ## Things that will look like shortcuts and are not
 
@@ -233,10 +338,7 @@ only thing that catches it.
 
 ```console
 pip install -e .[dev]
-python -m pytest                                     # 125 tests, no score needed
-python -m pytest tests/test_barnum.py                # one file
-python -m pytest tests/test_reflow.py::test_a_one_staff_system_still_has_barlines
-python -m pytest -k "barline or rehearsal"           # by name
+python -m pytest                                     # 162 tests, no score needed
 
 sheeets engines                                      # what is installed here
 sheeets inspect score.pdf --pages 3 --overlay out/   # which staff is which
