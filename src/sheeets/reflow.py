@@ -126,49 +126,7 @@ def system_barlines(
             groups[-1].append(int(x))
         else:
             groups.append([int(x)])
-    columns = [int(round(np.mean(g))) for g in groups]
-    if len(system.staves) == 1:
-        columns = _standing_alone(page.image, system.staves[0], columns)
-    return columns
-
-
-def _standing_alone(image, staff, columns: list[int], threshold: int = 160,
-                    near: tuple[float, float] = (0.15, 0.45)) -> list[int]:
-    """Of these columns, the ones with nothing printed against them.
-
-    On a system of one staff there is no second staff to vote, and the strict
-    full-height test is not enough by itself: a stem that runs from the top
-    line to the bottom passes it.  Measured on a born-digital drum-kit part,
-    that gave **518 barlines in a part of about seventy bars** — and reported
-    as "bars in the scan" it looks like an answer rather than a fault.
-
-    What a stem has and a barline has not is a notehead beside it.  So look
-    just to either side, in the spaces *between* the staff lines rather than
-    across them, and keep only the columns with clear paper on both sides.  On
-    the same drum part that leaves 65; on a publisher's timpani part it removes
-    three of 168, which is the cost.  Only for a one-staff system: where there
-    are staves to vote, the vote is the better test and this one would start
-    throwing away barlines that have a note tight against them.
-    """
-    lines = [float(y) for y in staff.lines]
-    space = float(staff.space)
-    if len(lines) < 2 or space <= 0:
-        return columns
-    ink = image < threshold
-    between = np.zeros(image.shape[1], dtype=bool)
-    for above, below in zip(lines, lines[1:]):
-        top = int(round(above + 0.25 * space))
-        bottom = int(round(below - 0.25 * space))
-        if bottom > top:
-            between |= ink[top:bottom].any(axis=0)
-    lo, hi = int(round(near[0] * space)), int(round(near[1] * space))
-    out = []
-    for x in columns:
-        left = between[max(0, x - hi) : max(0, x - lo)]
-        right = between[x + lo : x + hi]
-        if (not left.size or not left.any()) and (not right.size or not right.any()):
-            out.append(x)
-    return out
+    return [int(round(np.mean(g))) for g in groups]
 
 
 def cut_points(
