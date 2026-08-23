@@ -75,12 +75,43 @@ those two would have shown, and none of them were in the recognition:
   recognition against. Bar numbers are now used only where most systems carry
   one.
 
+## The measured baseline
+
 Recognition quality varies more between cases than anything else in the
-pipeline, and it is worth knowing the spread before trusting any single figure:
-a clean engraved part comes back within one measure of the truth, a drum-kit
-part with tight semiquaver writing has most of its bars flagged, and a
-third-generation photocopy loses three quarters of them. The extract half is
-unaffected — it is geometry, and it is right on all ten.
+pipeline, so the spread matters more than any single figure. Ten cases, all
+producing a PDF, `--retype` with Audiveris:
+
+| case | measures read | bars the page says | flagged |
+|---|---|---|---|
+| crooked scan | 104 | 105 | **1** |
+| publisher's part (clean engraving) | 402 | 403 | 6 |
+| bottom staff of a bound score | 402 | 403 | 41 |
+| photocopy of a photocopy | 66 | 76 | 47 |
+| born-digital drum kit | 68 | 75 | 59 |
+| hand-copied manuscript | 72 | 230 † | 44 |
+| three players stacked, taken whole | 326 | 217 † | 129 |
+| the same page, one player | 326 | 217 † | 165 |
+| very poor scan, wavy lines | 77 | 103 † | 71 |
+| worse photocopy still | **28** | 104 † | 19 |
+
+† the bar count is the barline estimate rather than printed numbers, and on
+these cases it is itself unreliable — see `reflow.system_barlines`. Where a
+page numbers its systems the two columns are an honest cross-check; where it
+does not, only the left one means anything.
+
+Three things that column tells you and no average would:
+
+- **A crooked scan is not a hard case.** Skew is measured and corrected, and
+  once it is, the page is as good as any other: 104 measures against 105 bars
+  with a single bar flagged is the best result in the fleet.
+- **Ink quality decides everything.** The two photocopies are the same music,
+  the same publisher and the same notation as cases that come back nearly
+  clean; one of them recognises 28 measures of 104. Nothing downstream can
+  recover from that, and the report says so rather than dressing it up.
+- **Density is the other axis.** The drum-kit part is born-digital and
+  perfectly printed, and 59 of its 68 measures are flagged — tight semiquaver
+  writing with drum noteheads is simply hard to read. A clean scan is not the
+  same thing as an easy one.
 
 ## The manifest
 
