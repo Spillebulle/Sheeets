@@ -72,6 +72,20 @@ Rules that keep it honest, and that must survive a refactor:
 - **Padding is for the numbering, not for the music.** Where bars cannot be
   recovered they go in as rests so that bar 300 is still bar 300, and they are
   named for proofreading. Never quietly.
+- **The page's systems and the recognition's are not always the same count.**
+  Audiveris splits a printed system in two; a crooked page loses one to the
+  detector. Throwing the page's numbers away when the counts differ discards
+  the only outside evidence there is — and on one part it also discarded ten
+  rehearsal letters that had been read correctly. `reconcile.align_spans`
+  lines the two up by how many bars each holds, allowing a page system to take
+  several recognised spans and a few recognised spans to be left out, and
+  refuses unless the answer is clearly better than pairing them off.
+- **A letter may only be placed where its bar is known.** A player trusts a
+  letter, so a letter in the wrong bar is worse than none. Nothing is placed
+  in a system whose bars the reconciliation could not line up (its total is
+  right and its insides are not), and a page's letters are all refused if any
+  two would share a bar or come out of order — rehearsal letters ascend, which
+  makes the mapping checkable.
 - **The barlines may only put a *floor* under a bar number.** They are the
   independent witness that catches a number read as something else entirely,
   and the first version of `_page_agrees` used them wrongly: it added up the
@@ -173,6 +187,22 @@ only thing that catches it.
   which is right for one misread box in a good run and catastrophic otherwise.
   Measured with a generous detector on a publisher's part: twenty-six
   candidates, four letters actually read, and a confident A to Z came back.
+- Looking for a rehearsal box as **one connected component**. On a publisher's
+  part the frames are printed grey — no pixel darker than 100, most of the
+  frame lighter than 160 — so at a threshold tight enough to separate a box
+  from the music the frame arrives in pieces, and at one generous enough to
+  catch the whole frame the box joins the ties and the bar number beside it.
+  Eight boxes of fifteen, three of them read. A rectangle is **two tall
+  vertical strokes of the same height, closed top and bottom, with white
+  between them**, and that description survives the generous threshold: the
+  longest vertical run in each column picks the sides out exactly (seventeen
+  columns of 2480 on one band, and they are the six box sides and nothing
+  else). Fifteen of fifteen, nothing spurious.
+- Dropping a box whose letter could not be read. That was right while the
+  shape test was the generous half; it is the other way round now, and
+  dropping the box throws away the *position*, which is what lets the run
+  close over the hole. Keep the box with an empty reading and let the sequence
+  supply the letter.
 - Reading a word off the page by asking what it says. Ask which of a known
   list it is. Two- and three-letter abbreviations at this size are past
   tesseract on their own — the first attempt got three answers out of

@@ -369,12 +369,18 @@ def retype(
                     grafted += score_xml.graft_directions(page_tree, tree)
                 # Repair before placing: a mark is put at a measure, and the
                 # repair is what decides which measure a printed bar is.
-                for line in reconcile(tree, facts, wanted, page_index):
+                shaky: set[int] = set()
+                used: list = []
+                for line in reconcile(tree, facts, wanted, page_index, shaky, used):
                     say(line)
                     warnings.append(line)
                 found = marks_of_page.get(page_index)
                 if found:
-                    lettered += _place_marks(tree, found)
+                    placed, line = _place_marks(tree, found, shaky, used)
+                    lettered += placed
+                    if line:
+                        say(f"page {page_index + 1}: {line}")
+                        warnings.append(f"page {page_index + 1}: {line}")
                 said = words_of_page.get(page_index)
                 if said:
                     named += _place_words(tree, said)
@@ -522,9 +528,9 @@ def _find_marks(extraction: Extraction, say,
         # close to useless at a rehearsal, so if the page plainly has boxes on
         # it and none could be read, that belongs in the report and not only in
         # the log — the person needs to know to write them in.
-        line = (f"{len(places)} boxed rehearsal mark(s) are printed on the page and "
-                f"none could be read with confidence; the fresh part carries none "
-                f"— write them in by hand")
+        line = (f"{len(places)} box-like shape(s) above the staves could not be read "
+                f"as a run of rehearsal letters; if this part has any, the fresh "
+                f"one carries none — write them in by hand")
         say(line)
         warnings.append(line)
     else:
@@ -569,19 +575,53 @@ def _read_boxes(extraction: Extraction):
     return places, letters
 
 
-def _place_marks(tree, found: list[tuple[int, int, str]]) -> int:
-    """Turn (system, bar) places into measure numbers and write the marks in."""
-    spans = score_xml.systems_of(tree)
+def _place_marks(tree, found: list[tuple[int, int, str]],
+                 shaky: set[int], spans: list | None = None) -> tuple[int, str]:
+    """Turn (system, bar) places into measure numbers and write the marks in.
+
+    Two things stop a letter going in, and both are the same rule said twice:
+    **a letter in the wrong bar is worse than no letter**, because a player
+    trusts it.
+
+    A system whose bars the reconciliation could not line up is skipped. Its
+    total is right and its insides are not — on a timpani part, system 6's
+    ninety-eight bars came out as one seventy-three-bar rest at the end
+    instead of the page's 4, 16, 24, 14, 34 and 3, and C, D, E and F then
+    landed on bars 65, 71, 72 and 76 where the page has 82, 106, 120 and 154.
+
+    And the letters that survive must land on **distinct measures, in order**.
+    Rehearsal letters ascend through a piece; two in one bar, or H before G,
+    means the mapping has failed however plausible each one looked. Measured
+    on the worst photocopy in the fleet, where the recognition is ten bars
+    short of the page: G and H both clamped to the last bar of their system
+    and were engraved on top of each other.
+    """
+    # The spans the reconciliation used, where it had any: the page's systems
+    # and the recognition's are not always the same count, and a mark's place
+    # is a *page* system.
+    spans = spans or score_xml.systems_of(tree)
     placed: list[tuple[int, str]] = []
+    skipped = 0
     for system_index, bar, text in found:
         if system_index >= len(spans):
+            continue
+        if -1 in shaky or system_index in shaky:
+            skipped += 1
             continue
         printed = score_xml.written_bars(tree, spans[system_index])
         if not printed:
             continue
         index = printed[min(bar, len(printed) - 1)][0]
         placed.append((index, text))
-    return score_xml.add_rehearsal_marks(tree, placed)
+    tangled = any(b[0] <= a[0] for a, b in zip(placed, placed[1:]))
+    if tangled:
+        return 0, (f"{len(placed)} rehearsal mark(s) would have shared a bar or "
+                   f"come out of order; none of this page's are used")
+    note = ""
+    if skipped:
+        note = (f"{skipped} rehearsal mark(s) are in a system whose bars could not "
+                f"be lined up, so their bar is not known; left out")
+    return score_xml.add_rehearsal_marks(tree, placed), note
 
 
 def _rasterise(pdf: Path, folder: Path, dpi: float) -> list[tuple[int, Path]]:

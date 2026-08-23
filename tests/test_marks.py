@@ -70,11 +70,42 @@ def test_the_letter_inside_is_read():
 
 
 @pytest.mark.skipif(not shutil.which("tesseract"), reason="tesseract not installed")
-def test_an_empty_box_is_not_a_rehearsal_mark():
-    # The shape test is generous on purpose; OCR is what rejects the leftovers.
+def test_a_box_whose_letter_cannot_be_read_keeps_its_place():
+    """This used to assert the opposite, and the reason it changed is the
+    whole design turning over. While the shape test was the generous half and
+    OCR the strict one, an unreadable box was a leftover and was dropped. It
+    is the other way round now: on a publisher's part the finder gets fifteen
+    boxes of fifteen and OCR reads fourteen of them. Dropping the fifteenth
+    threw away the *position* of B, and a sequence with a hole in it cannot be
+    closed. Kept, the run A–O closes over it."""
     image, top = page_with_box(" ", side=60, at=(400, 95))
-    assert find_boxes(image, top, SPACE)  # the shape is there
-    assert find_marks(image, top, SPACE) == []  # but nothing readable is in it
+    assert find_boxes(image, top, SPACE)             # the shape is there
+    marks = find_marks(image, top, SPACE)
+    assert [m.text for m in marks] == [""]           # and nothing is read in it
+
+
+def test_a_missed_box_does_not_overwrite_the_letter_beside_it():
+    """The chain reaches outwards from the letters it matched and fills in the
+    ones it wants. On a publisher's part the chain ran C to O, the item before
+    it read a clean "A", and the sequence wanted "B" there — so it corrected
+    the A, the run then began at B, and all fifteen letters were refused. The
+    A was right; what was missing was B's box, whose letter had not been read.
+    A clean letter *below* the expectation means a box was missed."""
+    from sheeets.marks import tidy_sequence
+
+    read = ["A", "", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O"]
+    letters, notes, kept = tidy_sequence(read)
+    assert letters == list("ABCDEFGHIJKLMNO")
+    assert len(kept) == 15
+    assert sum(1 for n in notes if n.endswith("corrected")) == 1
+
+
+def test_a_letter_above_the_expectation_is_still_a_misreading():
+    """The mirror case, which the rule above must not break: going backwards,
+    a letter that cannot belong further back is a misread and is corrected."""
+    from sheeets.marks import tidy_sequence
+
+    assert tidy_sequence(["A", "B", "G", "D", "E", "F", "G", "H"])[0] == list("ABCDEFGH")
 
 
 def test_a_mark_belongs_to_the_bar_it_sits_over():
@@ -240,3 +271,31 @@ def test_a_naming_carried_by_one_reading_alone_is_dropped():
     assert _vote(["Gyms.", "Gyms.", "Cyms."])[0] == "Cym."
     assert _vote(["as S.Dr.,", "is S.Dr.", "ie S.Dr.."]) == ("S. Dr.", 1.0)
     assert _vote(["(@)", "(@)", "(tr)"]) == ("", 0.0)
+
+
+def test_a_long_clean_run_may_begin_somewhere_other_than_A():
+    """A run every letter of which was read off the page cannot be shifted
+    along the alphabet — each letter is the letter it says it is — so where it
+    begins says only that the boxes before it were missed. One page of the
+    fleet reads a clean B to K, ten letters, nothing corrected; refusing it for
+    not starting at A placed nothing at all."""
+    from sheeets.marks import tidy_sequence
+
+    assert tidy_sequence(list("BCDEFGHIJK"))[0] == list("BCDEFGHIJK")
+
+
+def test_a_short_run_that_does_not_begin_at_A_is_still_refused():
+    """The fault this guard was written for is a pile of misreadings that
+    happen to ascend, and three of them are no evidence at all."""
+    from sheeets.marks import tidy_sequence
+
+    assert tidy_sequence(list("CDE"))[0] == []
+
+
+def test_rectangles_that_are_not_rehearsal_boxes_name_nothing():
+    """Read off the worst photocopy in the fleet, where the detector finds
+    eight box-shaped things in one system and none of them is a rehearsal
+    mark."""
+    from sheeets.marks import tidy_sequence
+
+    assert tidy_sequence(["U1", "O", "0", "O", "", "0", "", "J"])[0] == []

@@ -96,7 +96,9 @@ def _plausible_misread(read: str, wanted: str) -> bool:
     return False
 
 
-def reconcile(tree, facts, wanted, page_index: int) -> list[str]:
+def reconcile(tree, facts, wanted, page_index: int,
+              shaky: set[int] | None = None,
+              used: list | None = None) -> list[str]:
     """Make the recognised bars agree with the numbers printed on the page.
 
     An engine reads a multi-measure rest by reading the number over it, and
@@ -111,15 +113,39 @@ def reconcile(tree, facts, wanted, page_index: int) -> list[str]:
     the difference, the rests are set to what the page says.  Where they cannot,
     nothing is changed and the disagreement is reported — a part that says it
     is unsure is worth more than one that quietly invents bars.
+
+    `shaky` collects the systems whose bars could **not** be lined up, and it
+    matters to more than the report.  Where bars had to be invented the total
+    is right and the places inside the system are not, so anything positioned
+    by bar within that system is positioned wrongly.  Measured on a timpani
+    part: system 6 holds 98 bars and gets 98, but as one 73-bar rest at the
+    end instead of the page's 4, 16, 24, 14, 34 and 3 — and the four rehearsal
+    letters printed over those rests then landed on bars 65, 71, 72 and 76
+    where the page has 82, 106, 120 and 154.  A player trusts a letter, so a
+    letter in the wrong bar is worse than no letter.  `-1` means the whole
+    page.
     """
+    shaky = shaky if shaky is not None else set()
+    if used is not None:
+        used[:] = []
     if not facts:
         return []
     notes: list[str] = []
     mine = [f for f in facts if f.page_index == page_index]
     spans = score_xml.systems_of(tree)
     if len(mine) != len(spans):
-        return [f"page {page_index + 1}: the scan shows {len(mine)} system(s) and "
-                f"the recognition {len(spans)}; the printed bar numbers were not used"]
+        joined = align_spans(mine, spans, tree)
+        if joined is None:
+            shaky.add(-1)
+            return [f"page {page_index + 1}: the scan shows {len(mine)} system(s) and "
+                    f"the recognition {len(spans)}; the printed bar numbers were not "
+                    f"used"]
+        notes.append(f"page {page_index + 1}: the scan shows {len(mine)} system(s) and "
+                     f"the recognition {len(spans)}; lined up by how many bars each "
+                     f"holds")
+        spans = joined
+    if used is not None:
+        used[:] = spans
     for fact, span in reversed(list(zip(mine, spans))):
         want = wanted.get((fact.page_index, fact.system_index))
         if want is None:
@@ -139,17 +165,20 @@ def reconcile(tree, facts, wanted, page_index: int) -> list[str]:
             notes.append(f"{where}: the bar numbers say {want} bar(s) and the "
                          f"barlines on the page say about {fact.written}; "
                          f"the numbers are not used here")
+            shaky.add(fact.system_index)
             continue
         if len(printed) != fact.written:
             notes.append(f"{where}: the page has {fact.written} written bar(s) and the "
                          f"recognition {len(printed)}; the printed bar numbers say "
                          f"{want} bar(s) but nothing could be lined up")
+            shaky.add(fact.system_index)
             _pad(tree, span, want, where, notes)
             continue
         counts, note = _fit_counts(fact.rests, want - len(printed) + len(fact.rests))
         if counts is None:
             notes.append(f"{where}: the page says {want} bar(s) and "
                          f"{span[1] - span[0]} were read, but {note}")
+            shaky.add(fact.system_index)
             _pad(tree, span, want, where, notes)
             continue
         if note:
@@ -173,6 +202,81 @@ def reconcile(tree, facts, wanted, page_index: int) -> list[str]:
                              f"the page prints {now}")
                 score_xml.set_multi_rest(tree, index, now)
     return notes
+
+
+def align_spans(facts, spans, tree, most: int = 3, spare: int = 2,
+                spare_cost: float = 1.0):
+    """Match the systems the page shows to the systems the recognition made.
+
+    They are not always the same count.  Audiveris splits a printed system in
+    two, or the detector loses one off a crooked page, and the answer used to
+    be to throw the whole page's bar numbers away: "the scan shows 13
+    system(s) and the recognition 14; the printed bar numbers were not used".
+    That discards the only outside evidence the page offers, and on one part it
+    also discarded ten rehearsal letters that had been read correctly.
+
+    The two sequences can be lined up by what they are made of.  Each system
+    the page shows holds a known number of *printed* bars, counted from its
+    barlines; each recognised span holds a countable number too.  Both run in
+    the same order, so this is an alignment and not a matching: a page system
+    may take up to `most` recognised spans (the engine split it), and up to
+    `spare` recognised spans may be left out altogether (the page's own system
+    was never detected).  Measured on the crooked scan in the fleet, whose
+    thirteen detected systems hold 10, 7, 6, 5, 5, 7, 7, 7, 9, 8, 7, 6 and 7
+    bars against the recognition's fourteen at 9, 10, 7, 5, 5, 5, 6, 7, 7, 8,
+    8, 7, 6, 6: leaving out the recognition's *first* span lines the rest up
+    with a disagreement of four bars in ninety, where pairing them off one for
+    one disagrees by thirteen.
+
+    Returns one span per page system, or None where the answer would be a
+    guess: nothing is accepted unless it is at least twice as good as pairing
+    them off as far as they go.
+    """
+    if not facts or not spans or len(facts) > len(spans):
+        return None
+    printed = [len(score_xml.written_bars(tree, span)) for span in spans]
+    rows, columns = len(facts), len(spans)
+    if columns - rows > spare + rows * (most - 1):
+        return None
+    big = float("inf")
+    # cost[i][j][k]: i page systems and j spans used, k of them left out.
+    cost = [[[big] * (spare + 1) for _ in range(columns + 1)] for _ in range(rows + 1)]
+    back = [[[None] * (spare + 1) for _ in range(columns + 1)] for _ in range(rows + 1)]
+    cost[0][0][0] = 0.0
+    for i in range(rows + 1):
+        for j in range(columns + 1):
+            for k in range(spare + 1):
+                if cost[i][j][k] == big:
+                    continue
+                here = cost[i][j][k]
+                if j < columns and k < spare:          # leave this span out
+                    if here + spare_cost < cost[i][j + 1][k + 1]:
+                        cost[i][j + 1][k + 1] = here + spare_cost
+                        back[i][j + 1][k + 1] = (i, j, k, 0)
+                if i < rows:
+                    for take in range(1, min(most, columns - j) + 1):
+                        was = abs(sum(printed[j:j + take]) - facts[i].written)
+                        if here + was < cost[i + 1][j + take][k]:
+                            cost[i + 1][j + take][k] = here + was
+                            back[i + 1][j + take][k] = (i, j, k, take)
+    best, at = big, None
+    for k in range(spare + 1):
+        if cost[rows][columns][k] < best:
+            best, at = cost[rows][columns][k], k
+    if at is None:
+        return None
+    plain = sum(abs(printed[i] - facts[i].written) for i in range(rows))
+    if best * 2 > plain and rows != columns:
+        return None                      # no better than pairing them off
+    out: list[tuple[int, int]] = []
+    i, j, k = rows, columns, at
+    while back[i][j][k] is not None:
+        pi, pj, pk, take = back[i][j][k]
+        if take:
+            out.append((spans[pj][0], spans[pj + take - 1][1]))
+        i, j, k = pi, pj, pk
+    out.reverse()
+    return out if len(out) == rows else None
 
 
 def _pad(tree, span, want: int, where: str, notes: list[str]) -> None:

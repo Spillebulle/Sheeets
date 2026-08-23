@@ -778,15 +778,109 @@ Measured against the timpani scan, and worth knowing before the next attempt:
 - **Trills.** Audiveris returned zero `<trill-mark>` and zero `<wavy-line>`
   from either page; the part has dozens. Nothing downstream can put back what
   was never read.
-- **Rehearsal letters, on a part.** They work on the *score* — A to O, all
-  fifteen — and not on the publisher's part, where the boxes are small and
-  printed in grey. The box finder wants one connected component whose border
-  is inked at a threshold of 160; measured, no pixel of those frames is below
-  100 and most of the frame is above 160, so it finds 8 of 15 and reads 3 of
-  those. Scoring a hollow rectangle on **darkness** rather than on a threshold
-  finds more of them (J, K, M, N, O where the old test found only L) but the
-  candidate list is then mostly noise and the OCR of a 50-pixel letter is not
-  good enough to pick the real ones out. What that attempt did prove is that
-  `tidy_sequence` will fabricate: given twenty-six candidates of which four
-  read correctly, it returned a confident A to Z. It refuses a run that is
-  mostly correction now, and the count of unread boxes goes into the report.
+- **Rehearsal letters, on a part.** ~~They work on the score and not on a
+  part.~~ **Fixed — see "Finding a rehearsal box by its four strokes" below.**
+  Both Ruslan parts and the crooked scan carry their letters now.
+
+
+## Finding a rehearsal box by its four strokes
+
+A band part without rehearsal letters is close to useless at a rehearsal, and
+for a long time the app could only get them off a *score*. On a publisher's
+part it found 8 of 15 boxes and read 3 of those; the letters were refused, so
+the part carried none. Four things were wrong, and only the first is about
+image processing.
+
+**The frames are grey.** Measured on a timpani part: no pixel of a rehearsal
+box is darker than 100, and most of the frame is lighter than 160. That single
+fact defeats a connected-component finder from both sides. Threshold at 160
+and the frame arrives in pieces — the "J" box comes out as a 25x40 fragment
+scoring 0.13 where 0.30 is wanted. Threshold at 215 and the whole frame is
+there, but so is everything else, and the box joins the ties and the bar
+number beside it into one component the width of the system.
+
+**So do not look for a blob.** A rectangle is *two tall vertical strokes of the
+same height, closed top and bottom, with white between them*, and that
+description survives the generous threshold intact. Take the longest vertical
+run in each column of the band: on the band holding J, K and L, seventeen
+columns of 2480 carry a run of three staff spaces, and they are the six box
+sides and nothing else. Then test the **pair** — same height, a plausible gap,
+ink along all four edges, not solid in the middle. Fifteen boxes of fifteen,
+nothing spurious, and OCR then reads fourteen of them correctly.
+
+Two numbers in that test were wrong first and are worth writing down. The
+interior limit was 0.22 and had to be 0.55: a capital letter fills a third to a
+half of the space inside its frame, and the four edges are what makes the test
+specific — the middle only has to not be solid. And the edge test averaged over
+`h/20` rows, which asks a 43-pixel box on a score page to have a frame twice as
+thick as it has; it cost ten of the score's twenty-two boxes. Take the *best*
+line near each edge instead, which is scale-free.
+
+**Then three faults in what happens to the letters afterwards**, each of which
+alone still produced nothing:
+
+- **A box whose letter cannot be read must be kept.** It used to be dropped,
+  which was right while the shape test was the generous half. Now the shape
+  test is the reliable one, and dropping the box throws away the *position* —
+  the one thing that lets a run close over a hole. Fourteen letters read of
+  fifteen boxes; kept, the run closes and B goes in where the page has it.
+- **The chain must not overwrite a good reading.** It reaches outwards from
+  the letters it matched and declares each unused item the next letter without
+  looking at it. On the part the chain ran C to O, the item before it read a
+  clean "A", the sequence wanted "B" — so it corrected the A, the run then
+  began at B, and all fifteen were refused. A clean letter *below* the
+  expectation means a box was **missed**, not misread; one *above* it cannot
+  belong further back and is a misreading.
+- **"A run must begin at A" was too strong.** It was written against a pile of
+  misreadings that happened to ascend, and that is worth keeping — but a run
+  every letter of which was *read* cannot be shifted along the alphabet, so
+  where it begins says only that the boxes before it were missed. One page
+  reads a clean B to K, ten letters, nothing corrected, and refusing it placed
+  nothing. The rule is now: not starting at A is allowed if the run is at
+  least six long and needed no corrections.
+
+## Where a letter may be put, and where it may not
+
+A player trusts a letter, so a letter in the wrong bar is worse than no letter.
+Two guards, both of which fired on real parts the first time they were run.
+
+**Not in a system whose bars could not be lined up.** Its total is right and
+its insides are not. System 6 of the timpani part holds 98 bars and gets 98,
+but as one 73-bar rest at the end instead of the page's 4, 16, 24, 14, 34 and
+3 — so C, D, E and F landed on bars 65, 71, 72 and 76 where the page has 82,
+106, 120 and 154. `reconcile` now says which systems it could not line up and
+those letters are withheld: the part carries A, G, H, I, J, K, L, M, N, O and
+says why the other five are missing.
+
+**Not two in one bar, and never out of order.** Rehearsal letters ascend
+through a piece; that is checkable, and it catches a mapping that has failed
+however plausible each letter looked on its own. On the worst photocopy in the
+fleet, where the recognition is ten bars short of the page, G and H both
+clamped to the last bar of their system and were engraved on top of each
+other. The whole page's letters are refused when that happens.
+
+## Lining up systems the two halves disagree about
+
+"The scan shows 13 system(s) and the recognition 14; the printed bar numbers
+were not used" threw away the only outside evidence a page offers, and on the
+crooked scan it also threw away ten rehearsal letters that had been read
+correctly. Audiveris splits a printed system in two, or the detector loses one
+off a crooked page, and neither is rare.
+
+The two sequences can be lined up by what they are made of: each system the
+page shows holds a known number of printed bars, counted from its barlines, and
+so does each recognised span. Both run in the same order, so this is an
+alignment, not a matching — a page system may take up to three recognised spans
+(the engine split it) and up to two recognised spans may be left out (the page's
+own system was never detected). Measured on the crooked scan, whose thirteen
+detected systems hold 10, 7, 6, 5, 5, 7, 7, 7, 9, 8, 7, 6 and 7 bars against
+the recognition's fourteen at 9, 10, 7, 5, 5, 5, 6, 7, 7, 8, 8, 7, 6, 6:
+leaving out the recognition's *first* span lines the rest up with a
+disagreement of four bars in ninety, where pairing them off one for one
+disagrees by thirteen. Nothing is accepted unless it is at least twice as good
+as pairing off, and the page's letters then land within a bar of where the scan
+prints them — checked against the scan for B, D and E, one out for C.
+
+Which also says something about that page: the recognition was right and the
+*detector* lost a system, the first one, which is where its ink is lightest.
+That is the fault CLAUDE.md records for this case, seen from the other side.
