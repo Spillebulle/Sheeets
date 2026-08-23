@@ -578,7 +578,58 @@ def fill_incomplete(tree: ET.ElementTree) -> list[Repair]:
             out.append(Repair(
                 f"measure {number}: short by {Fraction(want - total, want)} of a bar; "
                 f"padded with a rest", measure=number, guess=True))
+        elif total > want:
+            out.extend(_trim_overfull(measure, number, total, want))
     return out
+
+
+def _trim_overfull(measure: ET.Element, number: int, total: int,
+                   want: int) -> list["Repair"]:
+    """Take a bar that is too long back down to its bar's length.
+
+    A bar that is *short* is a nuisance; a bar that is **long** poisons
+    everything after it.  LilyPond keeps counting from where the music
+    actually got to, so one extra sixteenth in bar 229 puts every later bar a
+    sixteenth off the barline grid — and a multi-measure rest that does not
+    start on a barline can neither be collapsed nor broken across a system.
+    Measured on a timpani part, one stray sixteenth rest made the last system
+    915 pt wide on a 595 pt page: the music simply ran off the paper, from bar
+    237 to the end.
+
+    The bar was already being flagged and nothing was acting on it.  What is
+    taken out is only ever a **rest**, longest last, and only where a rest can
+    account for the excess exactly — a bar whose *notes* overflow is left alone
+    and reported, because shortening a note changes the music and this cannot
+    know which one is wrong.
+    """
+    if measure.find("backup") is not None or measure.find("forward") is not None:
+        return [Repair(f"measure {number}: longer than its bar and holds more than one "
+                       f"voice; left alone", measure=number, guess=False)]
+    excess = total - want
+    rests = [n for n in measure.findall("note")
+             if n.find("rest") is not None and n.find("chord") is None
+             and (n.findtext("duration") or "").strip().isdigit()]
+    # Exactly one rest to drop is the common case and the safe one.
+    for note in reversed(rests):
+        if int(note.findtext("duration")) == excess:
+            measure.remove(note)
+            return [Repair(f"measure {number}: {Fraction(excess, want)} of a bar too "
+                           f"long; a rest of exactly that length was dropped",
+                           measure=number, guess=True)]
+    # Otherwise shorten the last rest that is long enough to give the excess up.
+    for note in reversed(rests):
+        was = int(note.findtext("duration"))
+        if was > excess:
+            note.find("duration").text = str(was - excess)
+            for tag in ("type", "dot"):
+                for child in list(note.findall(tag)):
+                    note.remove(child)
+            return [Repair(f"measure {number}: {Fraction(excess, want)} of a bar too "
+                           f"long; the last rest was shortened by it",
+                           measure=number, guess=True)]
+    return [Repair(f"measure {number}: {Fraction(excess, want)} of a bar too long and "
+                   f"no rest can account for it; left alone — it will push every "
+                   f"later bar off the barline", measure=number, guess=False)]
 
 
 @dataclass
@@ -1068,3 +1119,90 @@ def tame_text(tree: ET.ElementTree) -> list[str]:
             changed += 1
     return ([f"{changed} piece(s) of text held a quote or a backslash, which "
              f"LilyPond reads as syntax; taken out"] if changed else [])
+
+
+# The MusicXML marks that are drawn from a start to a stop.  Left open, each
+# one runs to the end of the piece.
+# `<tied>` is deliberately *not* here.  A tie carries no `number`, so adjacent
+# ties all collide on one key and pairing them by key removes music that is
+# perfectly well formed — it took out three real ties on the percussion part
+# before this list was narrowed.  A tie also cannot run away: it joins one note
+# to the next, and an unmatched one is drawn as a short hook, not across the
+# piece.  Pairing ties properly means matching pitch and voice to the following
+# note, which is a different job from this one.
+_SPANNERS = {
+    "slur": ("start", "stop"),
+    "wedge": (("crescendo", "diminuendo"), "stop"),
+    "octave-shift": (("up", "down"), "stop"),
+    "pedal": ("start", "stop"),
+    "bracket": ("start", "stop"),
+    "dashes": ("start", "stop"),
+}
+
+
+def close_the_spanners(tree: ET.ElementTree) -> list[str]:
+    """Throw away every mark that is drawn from a start to a stop and has one.
+
+    A slur, a tie and a hairpin are each written as two events, and recognition
+    loses one of them often — a smudged hairpin tip, a tie whose second note
+    was read as something else.  What is left is not a small error: an
+    unterminated spanner is drawn **to the end of the piece**.  On the
+    percussion part a crescendo opened at bar 50 and was still widening at bar
+    402, across nine systems and two pages, over music that is marked nothing
+    of the kind.
+
+    Nothing here can know where the mark was meant to end, and guessing would
+    put a crescendo somewhere the composer did not. So the orphan is removed
+    and reported. A start with no stop, and a stop with no start, both go: a
+    stray stop makes musicxml2ly drop the one before it instead.
+    """
+    part = tree.getroot().find("part")
+    if part is None:
+        return []
+    open_at: dict[tuple[str, str], tuple[ET.Element, ET.Element, str]] = {}
+    orphans: list[tuple[ET.Element, ET.Element, str, str]] = []
+    for measure in part.findall("measure"):
+        number = measure.get("number") or "?"
+        for holder in measure.iter():
+            for element in list(holder):
+                starts_with, stops_with = _SPANNERS.get(element.tag, (None, None))
+                if starts_with is None:
+                    continue
+                kind = element.get("type")
+                if element.tag == "slur" and element.get("number") is None:
+                    continue          # unnumbered slurs cannot be told apart
+                key = (element.tag, element.get("number", "1"))
+                if kind == stops_with:
+                    if key in open_at:
+                        del open_at[key]
+                    else:
+                        orphans.append((holder, element, number, "a stop with no start"))
+                elif kind == starts_with or (
+                    isinstance(starts_with, tuple) and kind in starts_with
+                ):
+                    if key in open_at:            # a start over a start
+                        was_holder, was, was_at = open_at[key]
+                        orphans.append((was_holder, was, was_at, "never stopped"))
+                    open_at[key] = (holder, element, number)
+    for holder, element, number in open_at.values():
+        orphans.append((holder, element, number, "never stopped"))
+
+    notes: list[str] = []
+    for holder, element, number, why in orphans:
+        try:
+            holder.remove(element)
+        except ValueError:                        # already gone with its parent
+            continue
+        notes.append(f"measure {number}: a {element.tag} {why}; removed rather than "
+                     f"drawn to the end of the piece")
+    _drop_empty_directions(part)
+    return notes
+
+
+def _drop_empty_directions(part: ET.Element) -> None:
+    """A `<direction>` whose only content was the mark just removed."""
+    for measure in part.findall("measure"):
+        for direction in list(measure.findall("direction")):
+            kinds = direction.findall("direction-type")
+            if kinds and all(len(kind) == 0 for kind in kinds):
+                measure.remove(direction)

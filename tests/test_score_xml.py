@@ -449,3 +449,82 @@ def test_a_bar_the_filler_pads_still_says_what_rest_it_is():
     padding = measure.findall("note")[-1]
     assert padding.find("rest") is not None
     assert padding.findtext("type") == "quarter"
+
+
+def _with_wedge(stop=True):
+    import xml.etree.ElementTree as ET
+
+    root = ET.Element("score-partwise")
+    part = ET.SubElement(root, "part")
+    for n in range(1, 4):
+        measure = ET.SubElement(part, "measure")
+        measure.set("number", str(n))
+        if n == 1 or (n == 3 and stop):
+            direction = ET.SubElement(measure, "direction")
+            kind = ET.SubElement(direction, "direction-type")
+            wedge = ET.SubElement(kind, "wedge")
+            wedge.set("type", "crescendo" if n == 1 else "stop")
+        note = ET.SubElement(measure, "note")
+        ET.SubElement(note, "duration").text = "4"
+    return ET.ElementTree(root), part
+
+
+def test_a_hairpin_that_never_stops_is_removed_not_drawn_to_the_end():
+    """An unterminated spanner is drawn to the end of the piece.  A crescendo
+    opened at bar 50 was still widening at bar 402, over nine systems."""
+    from sheeets.score_xml import close_the_spanners
+
+    tree, part = _with_wedge(stop=False)
+    notes = close_the_spanners(tree)
+    assert notes and "never stopped" in notes[0]
+    assert not list(part.iter("wedge"))
+    assert not part.findall(".//direction")      # its empty holder goes too
+
+
+def test_a_hairpin_with_both_ends_is_left_alone():
+    from sheeets.score_xml import close_the_spanners
+
+    tree, part = _with_wedge(stop=True)
+    assert close_the_spanners(tree) == []
+    assert len(list(part.iter("wedge"))) == 2
+
+
+def test_a_stop_with_no_start_goes_too():
+    """musicxml2ly answers a stray stop by ending the previous mark instead."""
+    import xml.etree.ElementTree as ET
+
+    from sheeets.score_xml import close_the_spanners
+
+    root = ET.Element("score-partwise")
+    part = ET.SubElement(root, "part")
+    measure = ET.SubElement(part, "measure")
+    measure.set("number", "1")
+    note = ET.SubElement(measure, "note")
+    ET.SubElement(note, "duration").text = "4"
+    slur = ET.SubElement(ET.SubElement(note, "notations"), "slur")
+    slur.set("type", "stop")
+    slur.set("number", "1")
+    notes = close_the_spanners(ET.ElementTree(root))
+    assert notes and "no start" in notes[0]
+    assert not list(part.iter("slur"))
+
+
+def test_a_tie_is_never_touched():
+    """A tie carries no number, so pairing ties by key collides them and takes
+    out music that is perfectly well formed — it removed three real ties on the
+    percussion part.  A tie also cannot run away: it joins one note to the
+    next."""
+    import xml.etree.ElementTree as ET
+
+    from sheeets.score_xml import close_the_spanners
+
+    root = ET.Element("score-partwise")
+    part = ET.SubElement(root, "part")
+    measure = ET.SubElement(part, "measure")
+    measure.set("number", "1")
+    note = ET.SubElement(measure, "note")
+    ET.SubElement(note, "duration").text = "4"
+    notations = ET.SubElement(note, "notations")
+    ET.SubElement(notations, "tied").set("type", "start")
+    assert close_the_spanners(ET.ElementTree(root)) == []
+    assert len(list(part.iter("tied"))) == 1

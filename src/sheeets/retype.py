@@ -381,6 +381,9 @@ def retype(
     for line in seams:
         say(line)
     repairs = score_xml.sanitize(tree)
+    for line in score_xml.close_the_spanners(tree):
+        say(line)
+        warnings.append(line)
     for line in score_xml.tame_text(tree):
         say(line)
         warnings.append(line)
