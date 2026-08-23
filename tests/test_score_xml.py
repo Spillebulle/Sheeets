@@ -578,3 +578,150 @@ def test_a_slur_inside_one_voice_survives():
         element.set("number", "1")
     assert close_the_spanners(ET.ElementTree(root)) == []
     assert len(list(part.iter("slur"))) == 2
+
+
+def _two_voice_bar(one, two, *, divisions=2, beats=4):
+    """A 4/4 bar written the way Audiveris writes two voices: the first voice,
+    a `<backup>` to the barline, then the second.  `one` and `two` are
+    (duration, is_rest) pairs."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.Element("score-partwise")
+    part = ET.SubElement(root, "part")
+    measure = ET.SubElement(part, "measure")
+    measure.set("number", "36")
+    attributes = ET.SubElement(measure, "attributes")
+    ET.SubElement(attributes, "divisions").text = str(divisions)
+    time = ET.SubElement(attributes, "time")
+    ET.SubElement(time, "beats").text = str(beats)
+    ET.SubElement(time, "beat-type").text = "4"
+
+    def lay(pairs, voice):
+        for duration, is_rest in pairs:
+            note = ET.SubElement(measure, "note")
+            if is_rest:
+                ET.SubElement(note, "rest")
+            else:
+                ET.SubElement(ET.SubElement(note, "pitch"), "step").text = "C"
+            ET.SubElement(note, "duration").text = str(duration)
+            ET.SubElement(note, "voice").text = str(voice)
+
+    lay(one, 1)
+    ET.SubElement(ET.SubElement(measure, "backup"), "duration").text = str(
+        sum(d for d, _ in one))
+    lay(two, 2)
+    return ET.ElementTree(root), measure
+
+
+def _voice_lengths(measure):
+    from sheeets.score_xml import _voice_spans
+
+    return _voice_spans(measure)[0]
+
+
+def test_an_over_long_voice_is_trimmed_even_beside_another_voice():
+    """Bar 36 of the percussion part: voice one runs a quarter past the
+    barline on rests alone while voice two is short.  The first version
+    refused any bar with a `<backup>` in it, so the whole part stayed off the
+    grid from bar 36 to the end."""
+    from sheeets.score_xml import fill_incomplete, measure_length
+
+    tree, measure = _two_voice_bar(
+        [(2, True), (2, True), (4, True), (2, True)],       # ten, wants eight
+        [(2, False), (2, False), (2, False)])               # six: musicxml2ly
+    repairs = fill_incomplete(tree)                          # pads it with a skip
+    assert repairs and repairs[0].guess
+    assert _voice_lengths(measure) == {"1": 8, "2": 6}
+    assert measure_length(measure) == 8
+
+
+def test_trimming_a_voice_brings_its_backup_back_to_the_barline():
+    """A `<backup>` returns the cursor to nought — measured, all 528 of the
+    fleet's do.  Shorten the voice before it and leave the backup alone and
+    the next voice starts *before* the barline."""
+    from sheeets.score_xml import fill_incomplete
+
+    tree, measure = _two_voice_bar(
+        [(2, False), (2, False), (2, False), (2, True), (2, True)],
+        [(8, False)])
+    fill_incomplete(tree)
+    assert measure.findtext("backup/duration") == "8"
+    assert _voice_lengths(measure) == {"1": 8, "2": 8}
+
+
+def test_the_second_voice_is_trimmed_on_its_own_trailing_rests():
+    """Bar 72: voice two overruns, voice one is short.  Only voice two may be
+    touched, and only its rests."""
+    from sheeets.score_xml import fill_incomplete
+
+    tree, measure = _two_voice_bar(
+        [(4, False), (2, False)],
+        [(4, False), (4, False), (2, True), (8, True)], divisions=4)
+    fill_incomplete(tree)
+    assert _voice_lengths(measure) == {"1": 6, "2": 16}
+    assert [n.findtext("duration") for n in measure.findall("note")
+            if n.findtext("voice") == "2"] == ["4", "4", "8"]
+
+
+def test_a_voice_that_overruns_on_notes_alone_gives_the_notes_back():
+    """Leaving it puts every later bar off the barline, which is a worse
+    answer than a flagged bar — so the notes at the end go, and the repair
+    says so in as many words."""
+    from sheeets.score_xml import fill_incomplete
+
+    tree, measure = _two_voice_bar(
+        [(2, False)] * 5,                    # five quarters in a 4/4 bar
+        [(8, False)])
+    repairs = fill_incomplete(tree)
+    assert _voice_lengths(measure) == {"1": 8, "2": 8}
+    assert "written notes" in str(repairs[0])
+    assert repairs[0].guess
+
+
+def test_a_chord_is_taken_out_with_its_head():
+    """Drop the note a chord hangs off and the notes below it become a chord
+    attached to whatever came before."""
+    import xml.etree.ElementTree as ET
+
+    from sheeets.score_xml import fill_incomplete
+
+    tree, measure = _two_voice_bar([(2, False)] * 5, [(8, False)])
+    head = [n for n in measure.findall("note") if n.findtext("voice") == "1"][-1]
+    below = ET.SubElement(measure, "note")
+    ET.SubElement(below, "chord")
+    ET.SubElement(ET.SubElement(below, "pitch"), "step").text = "E"
+    ET.SubElement(below, "duration").text = "2"
+    ET.SubElement(below, "voice").text = "1"
+    measure.remove(below)
+    measure.insert(list(measure).index(head) + 1, below)
+
+    fill_incomplete(tree)
+    assert below not in list(measure)
+    assert head not in list(measure)
+
+
+def test_lilypond_bar_checks_reach_the_report():
+    """The fault that put a timpani part off the side of the paper was one
+    line in LilyPond's log and nothing the app measured.  It is a warning
+    now."""
+    from pathlib import Path
+
+    from sheeets.engrave import Engraved
+
+    log = ("Preprocessing graphical objects...\n"
+           "part.ly:820:12: warning: barcheck failed at: 1/16\n"
+           "part.ly:951:2: warning: barcheck failed at: 1/4\n"
+           "Layout output to `part.pdf'...\n")
+    said = Engraved(pdf=Path("x.pdf"), lilypond=Path("x.ly"), log=log).complaints()
+    assert len(said) == 1
+    assert "2 bar check(s) failed" in said[0]
+
+
+def test_a_clean_lilypond_log_says_nothing():
+    from pathlib import Path
+
+    from sheeets.engrave import Engraved
+
+    log = ("Processing `part.ly'\nInterpreting music...\n"
+           "warning: no \\version statement found\nLayout output to `part.pdf'...\n")
+    assert Engraved(pdf=Path("x.pdf"), lilypond=Path("x.ly"), log=log).complaints() == []

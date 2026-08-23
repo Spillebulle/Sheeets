@@ -24,6 +24,39 @@ class Engraved:
     lilypond: Path
     log: str
 
+    def complaints(self) -> list[str]:
+        """What LilyPond said about the music, in the app's own words.
+
+        This is here because of a fault that was reported by the person
+        reading the PDF and not by anything the app measured: a timpani part
+        whose last system was 915 pt wide on a 595 pt page.  Every number the
+        app printed was healthy — the right number of measures, the right
+        number of bars, six flagged — and the cause had been sitting in
+        LilyPond's log the whole time, one line saying `barcheck failed at:
+        1/16`.  A bar check that fails means the barline grid is off from
+        there on, which is not something a count of measures can see.
+
+        So the engraver reports what the engraver knows.  Only the lines that
+        mean the music is wrong are kept; LilyPond is talkative about
+        typography and none of that belongs in a warning list.
+        """
+        out: list[str] = []
+        checks = sorted({m for m in re.findall(r"barcheck failed at: (\S+)", self.log)})
+        if checks:
+            out.append(f"LilyPond: the barline grid is off — {len(checks)} bar check(s) "
+                       f"failed, the first {checks[0]} into a bar")
+        for pattern, say in (
+            (r"warning: .*[Cc]lash", "LilyPond: notes or rests collide"),
+            (r"warning: .*[Uu]nterminated", "LilyPond: a spanner is left open"),
+            (r"warning: .*no viable initial configuration",
+             "LilyPond: a beam or slur could not be drawn"),
+            (r"programming error", "LilyPond: internal error — the PDF may be wrong"),
+        ):
+            hits = len(re.findall(pattern, self.log))
+            if hits:
+                out.append(f"{say} ({hits})")
+        return out
+
 
 class LilyPondEngraver:
     """Turn MusicXML into a freshly engraved PDF."""

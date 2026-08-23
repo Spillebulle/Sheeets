@@ -554,9 +554,18 @@ def fill_incomplete(tree: ET.ElementTree) -> list[Repair]:
         number = int(measure.get("number") or 0)
 
         notes = [n for n in measure.findall("note") if n.find("chord") is None]
-        if any(n.find("rest") is not None and n.find("rest").get("measure") == "yes"
-               for n in notes):
-            continue
+        # A bar's rest lasts a bar, whatever length was written on it, and a
+        # bar holding one is not therefore beyond repair: on four of the fleet
+        # a whole-bar rest sat in one voice while another voice overran, and
+        # skipping the bar for the rest's sake left the overrun in place.
+        for note in notes:
+            rest = note.find("rest")
+            if rest is not None and rest.get("measure") == "yes":
+                length = note.find("duration")
+                if length is not None and _duration_of(note) != want:
+                    length.text = str(want)
+        _mend_missing_backups(measure, want)
+        _mend_the_cursor(measure)
         total = measure_length(measure)
 
         if total == 0 and not notes:
@@ -579,12 +588,12 @@ def fill_incomplete(tree: ET.ElementTree) -> list[Repair]:
                 f"measure {number}: short by {Fraction(want - total, want)} of a bar; "
                 f"padded with a rest", measure=number, guess=True))
         elif total > want:
-            out.extend(_trim_overfull(measure, number, total, want))
+            out.extend(_trim_overfull(measure, number, want, div))
     return out
 
 
-def _trim_overfull(measure: ET.Element, number: int, total: int,
-                   want: int) -> list["Repair"]:
+def _trim_overfull(measure: ET.Element, number: int, want: int,
+                   divisions: int) -> list["Repair"]:
     """Take a bar that is too long back down to its bar's length.
 
     A bar that is *short* is a nuisance; a bar that is **long** poisons
@@ -596,40 +605,281 @@ def _trim_overfull(measure: ET.Element, number: int, total: int,
     915 pt wide on a 595 pt page: the music simply ran off the paper, from bar
     237 to the end.
 
-    The bar was already being flagged and nothing was acting on it.  What is
-    taken out is only ever a **rest**, longest last, and only where a rest can
-    account for the excess exactly — a bar whose *notes* overflow is left alone
-    and reported, because shortening a note changes the music and this cannot
-    know which one is wrong.
+    **The overflow belongs to one voice**, which is why this looks inside
+    them.  The first version refused any bar holding a `<backup>` and so
+    repaired nothing at all on a percussion part, where 61 bars have two
+    voices: bar 36 was a quarter too long in voice one, whose four notes are
+    all rests, and bar 72 five quarters too long in voice two, whose last two
+    are.  A voice that is too *short* needs nothing done to it — measured,
+    musicxml2ly pads one with a skip of its own accord, so `e4 e4 e4` in a 4/4
+    bar comes out as `e4 e4 e4 s4` and the bar check passes.
+
+    Four passes, least damaging first: the `<forward>` gaps written before the
+    voice comes in, then its trailing rests, then any other rest in it, and
+    only then — and only for a small overrun — the notes at its end.  That
+    last one is a real change to the music and is reported as one.  It is
+    still the better answer than leaving a small overrun: the alternative is
+    not "the bar as written" but every bar after it off the grid, which is the
+    fault that was reported as "a complete mess from bar 237".
     """
-    if measure.find("backup") is not None or measure.find("forward") is not None:
-        return [Repair(f"measure {number}: longer than its bar and holds more than one "
-                       f"voice; left alone", measure=number, guess=False)]
-    excess = total - want
-    rests = [n for n in measure.findall("note")
-             if n.find("rest") is not None and n.find("chord") is None
-             and (n.findtext("duration") or "").strip().isdigit()]
-    # Exactly one rest to drop is the common case and the safe one.
-    for note in reversed(rests):
-        if int(note.findtext("duration")) == excess:
-            measure.remove(note)
-            return [Repair(f"measure {number}: {Fraction(excess, want)} of a bar too "
-                           f"long; a rest of exactly that length was dropped",
-                           measure=number, guess=True)]
-    # Otherwise shorten the last rest that is long enough to give the excess up.
-    for note in reversed(rests):
-        was = int(note.findtext("duration"))
-        if was > excess:
-            note.find("duration").text = str(was - excess)
-            for tag in ("type", "dot"):
-                for child in list(note.findall(tag)):
-                    note.remove(child)
-            return [Repair(f"measure {number}: {Fraction(excess, want)} of a bar too "
-                           f"long; the last rest was shortened by it",
-                           measure=number, guess=True)]
-    return [Repair(f"measure {number}: {Fraction(excess, want)} of a bar too long and "
-                   f"no rest can account for it; left alone — it will push every "
-                   f"later bar off the barline", measure=number, guess=False)]
+    out: list[Repair] = []
+    _mend_the_cursor(measure)   # before measuring: an overshooting backup hides
+    spans, order, gaps = _voice_spans(measure)   # a voice behind the barline
+    gone: set[int] = set()
+    for voice in sorted(spans):
+        excess = spans[voice] - want
+        if excess <= 0:
+            continue
+        was_over, taken, hurt = excess, 0, 0
+        notes = [n for n in order[voice] if n.find("chord") is None]
+
+        def give(note: ET.Element) -> None:
+            nonlocal excess, taken, hurt
+            before = excess
+            excess, taken = _give_back(measure, note, excess, taken,
+                                       divisions, gone)
+            if note.tag == "note" and note.find("rest") is None:
+                hurt += before - excess
+
+        trailing: list[ET.Element] = []
+        for note in reversed(notes):
+            if note.find("rest") is None:
+                break
+            trailing.append(note)
+        rests = [n for n in reversed(notes) if n.find("rest") is not None]
+        def spend(wave: list[ET.Element]) -> None:
+            for note in wave:               # one rest worth exactly the excess
+                if excess and id(note) not in gone and _duration_of(note) == excess:
+                    give(note)
+                    break
+            for note in wave:
+                if excess <= 0:
+                    break
+                if id(note) not in gone:
+                    give(note)
+
+        for wave in (gaps.get(voice, [])[::-1], trailing, rests):
+            spend(wave)
+        # What is left has to come out of written notes, and that is only
+        # done for an overrun of **half a bar or less**.  Bigger than that and
+        # the fault is much more likely to be the time signature than the
+        # notes: measured across the fleet, the voices that overrun by more
+        # are on pages where Audiveris printed no `<time>` of its own and the
+        # previous page's carried over — one of them is a bar of five quarters
+        # declared 3/8, and another is 138 divisions in a bar of 48.  Deleting
+        # most of the music to fit a meter that is itself misread is the worse
+        # answer of the two, so those bars are left long and said so.
+        #
+        # Half, not a quarter: bar 7 of one part is an eighth, an eighth and a
+        # half-note in a 2/4 bar, where the half is plainly a misread quarter.
+        # The excess is exactly half a bar, and a quarter-bar line refused the
+        # one change that bar needs.
+        too_much = excess * 2 > want
+        if not too_much:
+            spend(notes[::-1])
+
+        where = (f"measure {number}: voice {voice} was "
+                 f"{Fraction(was_over, want)} of a bar too long")
+        if excess and too_much:
+            out.append(Repair(
+                where + "; that is too much of it to be a misread note, so "
+                "the time signature is the more likely fault and the music "
+                "was left as it was — every later bar sits off the barline",
+                measure=number, guess=False))
+        elif excess:
+            out.append(Repair(
+                where + "; nothing in it could be shortened, so every later "
+                "bar sits off the barline", measure=number, guess=False))
+        elif hurt:
+            out.append(Repair(
+                where + f"; {Fraction(was_over - hurt, want)} of rest and "
+                f"{Fraction(hurt, want)} of *written notes* were taken out to "
+                "put the barline back", measure=number, guess=True))
+        else:
+            out.append(Repair(
+                where + f"; {Fraction(taken, want)} of rest was taken out",
+                measure=number, guess=True))
+    _mend_the_cursor(measure)
+    return out
+
+
+def _mend_missing_backups(measure: ET.Element, want: int) -> bool:
+    """Put back a `<backup>` Audiveris left out between two voices.
+
+    MusicXML lays a second voice down by stepping the cursor back to the
+    barline first, and Audiveris usually writes that backup — but not always.
+    Bar 182 of one part is two whole-bar rests, one per voice, written one
+    after the other with nothing between them, so the second reads as starting
+    on beat five and the bar is twice its length.  LilyPond then loses the
+    barline for good.
+
+    The repair is only made when it is provably the right one: the bar must be
+    too long as written, the missing backups must be at the point where a
+    voice that has not sounded yet begins, and putting them in must bring the
+    bar back to its length.  A bar where two voices genuinely take turns —
+    voice one for two beats, voice two for the next two — is not too long, so
+    it is never touched.
+    """
+    if measure_length(measure) <= want:
+        return False
+    cursor = 0
+    seen: set[str] = set()
+    current: str | None = None
+    marks: list[tuple[int, int]] = []
+    for index, element in enumerate(measure):
+        if element.tag == "note":
+            voice = element.findtext("voice") or "1"
+            if voice != current:
+                if voice not in seen and cursor > 0:
+                    marks.append((index, cursor))
+                    cursor = 0
+                current = voice
+                seen.add(voice)
+            if element.find("chord") is None:
+                cursor += _duration_of(element)
+        elif element.tag == "backup":
+            cursor -= _duration_of(element)
+            current = None
+        elif element.tag == "forward":
+            cursor += _duration_of(element)
+    if not marks:
+        return False
+    trial = copy.deepcopy(measure)
+    for index, back in reversed(marks):
+        trial.insert(index, _backup(back))
+    if measure_length(trial) > want:
+        return False
+    for index, back in reversed(marks):
+        measure.insert(index, _backup(back))
+    return True
+
+
+def _backup(duration: int) -> ET.Element:
+    element = ET.Element("backup")
+    ET.SubElement(element, "duration").text = str(duration)
+    return element
+
+
+def _voice_spans(measure: ET.Element) -> tuple[dict[str, int],
+                                              dict[str, list[ET.Element]],
+                                              dict[str, list[ET.Element]]]:
+    """How far each voice reaches, its notes, and the gaps written before them.
+
+    Walk the same cursor `measure_length` walks, so a `<backup>` puts the next
+    voice back at the start of the bar instead of adding to it.  A voice's
+    length is the furthest the cursor got while that voice was sounding.
+
+    A `<forward>` is a gap — whitespace before a voice comes in — and it is
+    handed back separately because it is the *least damaging* thing to shorten
+    when a voice runs past the barline: taking a beat out of a gap moves a
+    note, taking one out of a note deletes music.  Bar 66 of one part is a
+    gap of fifty-four in a bar of forty-eight, so the note after it could
+    never fit however much of the note was given up.
+    """
+    spans: dict[str, int] = {}
+    order: dict[str, list[ET.Element]] = {}
+    gaps: dict[str, list[ET.Element]] = {}
+    waiting: list[ET.Element] = []
+    cursor = 0
+    for element in measure:
+        if element.tag == "note":
+            voice = element.findtext("voice") or "1"
+            order.setdefault(voice, []).append(element)
+            gaps.setdefault(voice, []).extend(waiting)
+            waiting = []
+            if element.find("chord") is not None:
+                continue
+            cursor += _duration_of(element)
+            spans[voice] = max(spans.get(voice, 0), cursor)
+        elif element.tag == "backup":
+            cursor -= _duration_of(element)
+            waiting = []
+        elif element.tag == "forward":
+            cursor += _duration_of(element)
+            waiting.append(element)
+    return spans, order, gaps
+
+
+def _duration_of(element: ET.Element) -> int:
+    text = (element.findtext("duration") or "").strip()
+    return int(text) if text.lstrip("-").isdigit() else 0
+
+
+def _give_back(measure: ET.Element, note: ET.Element, excess: int, taken: int,
+               divisions: int, gone: set[int]) -> tuple[int, int]:
+    """Drop or shorten one note, and say how much of the excess is left."""
+    was = _duration_of(note)
+    if was <= 0:
+        return excess, taken
+    if was <= excess:
+        for other in _chord_with(measure, note):
+            measure.remove(other)
+            gone.add(id(other))
+        measure.remove(note)
+        gone.add(id(note))
+        return excess - was, taken + was
+    for part in [note, *_chord_with(measure, note)]:
+        part.find("duration").text = str(was - excess)
+        if part.tag != "note":
+            continue                    # a <forward> is a gap; it has no value
+        for tag in ("type", "dot", "time-modification"):
+            for child in list(part.findall(tag)):
+                part.remove(child)
+        if divisions:
+            _name_one(part, (was - excess) / divisions)
+    return 0, taken + excess
+
+
+def _chord_with(measure: ET.Element, note: ET.Element) -> list[ET.Element]:
+    """The `<chord>` notes sounding with this one, so the two go together.
+
+    Drop the head of a chord on its own and the notes below it become a chord
+    with nothing to attach to, which is a different bar again.
+    """
+    children = list(measure)
+    try:
+        at = children.index(note)
+    except ValueError:
+        return []
+    out: list[ET.Element] = []
+    for element in children[at + 1:]:
+        if element.tag != "note" or element.find("chord") is None:
+            break
+        out.append(element)
+    return out
+
+
+def _mend_the_cursor(measure: ET.Element) -> None:
+    """Stop a `<backup>` from stepping back past the start of the bar.
+
+    A backup usually returns the cursor to nought before the next voice, and
+    once a voice has been shortened its backup is too long by the same amount:
+    left alone it would start the next voice *before* the barline.  It happens
+    without any shortening too — Audiveris writes the same backup after every
+    voice of a bar, sized for the longest, so the shorter ones step back too
+    far as written.
+
+    Only an overshoot is corrected, never a backup that lands inside the bar:
+    a voice that genuinely comes in on beat three is written exactly that way,
+    and rewriting its backup would move it.  A cursor below nought is not a
+    reading of the music at all, which is what makes this safe.
+    """
+    cursor = 0
+    for element in list(measure):
+        if element.tag == "note":
+            if element.find("chord") is None:
+                cursor += _duration_of(element)
+        elif element.tag == "forward":
+            cursor += _duration_of(element)
+        elif element.tag == "backup":
+            back = _duration_of(element)
+            if cursor <= 0:
+                measure.remove(element)
+                continue
+            if back > cursor:
+                element.find("duration").text = str(cursor)
+                back = cursor
+            cursor -= back
 
 
 @dataclass

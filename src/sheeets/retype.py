@@ -434,6 +434,13 @@ def retype(
     say("engraving")
     engraved = engraver.engrave(musicxml, out, staff_size=staff_size,
                                 paper=paper, landscape=landscape)
+    # Ask the engraver what it thought of the music.  A bar check it failed is
+    # the one fault a count of measures cannot see, and it is the fault that
+    # put a timpani part off the side of the paper while every number the app
+    # printed said the part was fine.
+    for complaint in engraved.complaints():
+        warnings.append(complaint)
+        say(complaint)
 
     spans: list[PageSpan] = []
     at = 0
