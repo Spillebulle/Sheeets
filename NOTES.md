@@ -622,6 +622,37 @@ one: below one note in ten they are furniture.
 - **The last page of the book of parts.** Its header reads "cm RULE BRITANNIA”
   — nearmmans", with no legible player, so it is called "part 20". It may be a
   second percussion page rather than a part of its own.
+- **Bars that line up in total but not in place.** System 6 of the timpani part
+  holds 98 bars and the fresh part gives it 98, but not in the same places: the
+  page prints rests of 4, 16, 24, 14, 34 and 3 separated by rehearsal letters,
+  and the retype puts a single 73-bar rest at the end of the system. The total
+  is forced by the bar numbers and is right; the *distribution* is refused,
+  correctly, and `_pad` has nowhere better to put what it must invent.
+
+  It is refused because the arithmetic is genuinely ambiguous. The counts read
+  off the page are 44, 16, ?, 14, 34, 3 against a target of 95, so one of them
+  is wrong as well as one unreadable — and there are **six** single
+  corrections that make the sum work, of which "44 was really 4, so the
+  unreadable one is 24" is only one. Audiveris's own reading of the same rests
+  ([4, ·, ·, 6, ·, 4, 4, 3, ·]) looks like a tie-break and is not: it drops the
+  tens digit off every two-digit count, so its "4" is equally consistent with
+  the right answer and with the wrong one. Two witnesses that fail the same way
+  are one witness. Something outside the arithmetic is needed — the rehearsal
+  letters printed over those rests would do it, which is another reason to want
+  them off a part.
+
+  What this costs, and what it does not: the bar *numbering* stays right from
+  the next system on, because the total is right; inside the system the numbers
+  drift. A player told "from bar 100" is in the wrong place; a player told
+  "from letter D" would not be. It is reported as "73 bar(s) the page has and
+  the recognition does not — proofread them", and the 73-bar rest is at least
+  conspicuous rather than plausible.
+- **Trills.** Audiveris returns no `<trill-mark>` and no `<wavy-line>` at all
+  from either Ruslan page, and the timpani part has dozens. Nothing downstream
+  can put back what was never read, and `words.py` will not help: `tr` with a
+  wavy line is not text. Finding them would be a shape hunt of the same kind as
+  `marks.find_boxes` — a short horizontal squiggle above a note — and the
+  measurement to make first is how often Audiveris misses one.
 
 ## Four faults that only the scan could show
 
@@ -727,6 +758,18 @@ every wrong one at 0.80 or below, so the line sits above 0.80 rather than
 between. What the vocabulary cannot vouch for keeps the honest answer it
 always had — a position, mapped to a bar, in the list of markings the fresh
 part could not carry.
+
+Then every naming the fleet made was rendered as a contact sheet and looked
+at, which is the only verification worth anything here. Thirty-three
+markings, thirty-two right — "tamb. on h/h", "Sus.cym. (G#", "Xylophone",
+"Tubular bells", "Bass drum", "Tutti, tempo di Marcia." all named correctly
+across five parts and three hands — and one wrong: a notehead with a slur
+after it, named **Gong**. It is the only one of the thirty-three that a
+single enlargement carried on its own; tesseract read "Gon" once and nothing
+the other two times. So a fourth rule, and the cheapest of the four: **two of
+the three enlargements must point at the same word.** It costs nothing,
+because the vocabulary pulls even a poor reading to the right entry — "Gyms.",
+"Gyms." and "Cyms." score 0.57, 0.57 and 0.86 and all three name *Cym.*
 
 ### What is still missing from the fresh part
 

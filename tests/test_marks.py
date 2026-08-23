@@ -226,3 +226,17 @@ def test_the_words_go_into_the_music_where_they_are_named():
     assert part.findall("measure")[1].find("direction").get("placement") == "above"
     # and not twice, however many times it is offered
     assert add_words(ET.ElementTree(root), [(1, "Tri.", True)]) == 0
+
+
+def test_a_naming_carried_by_one_reading_alone_is_dropped():
+    """Of thirty-three markings named across the fleet, exactly one was
+    plainly wrong — a notehead and a slur named "Gong" — and it is the only
+    one no second enlargement agreed with: tesseract saw "Gon" once and
+    nothing the other two times.  A true naming survives poor readings,
+    because the vocabulary pulls them all to the same word."""
+    from sheeets.words import _vote
+
+    assert _vote(["Gon", "Oe", "oo Se."]) == ("", 0.0)
+    assert _vote(["Gyms.", "Gyms.", "Cyms."])[0] == "Cym."
+    assert _vote(["as S.Dr.,", "is S.Dr.", "ie S.Dr.."]) == ("S. Dr.", 1.0)
+    assert _vote(["(@)", "(@)", "(tr)"]) == ("", 0.0)

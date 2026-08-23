@@ -268,13 +268,37 @@ def read(image: np.ndarray, markings: list[Marking], space: float,
             if crop is None:
                 out.append(mark)
                 continue
-            best, score = "", 0.0
-            for reading in _readings(crop, Path(tmp) / f"w{n}.png"):
-                word, ratio = likeness(reading)
-                if ratio > score:
-                    best, score = word, ratio
+            best, score = _vote(_readings(crop, Path(tmp) / f"w{n}.png"))
             out.append(replace(mark, text=best) if score >= least else mark)
     return out
+
+
+def _vote(readings: list[str]) -> tuple[str, float]:
+    """The marking the enlargements agree on, and the best score it got.
+
+    Two of the three have to point at the same thing.  Measured across the
+    fleet's thirty-three namings, the one that was plainly wrong — a notehead
+    and a slur named "Gong" — is the only one carried by a single reading:
+    tesseract saw "Gon" at one enlargement and nothing at the other two.  A
+    true naming is agreed on even where only one enlargement reads it well,
+    because the vocabulary pulls the poor readings to the same word: "Gyms.",
+    "Gyms." and "Cyms." are 0.57, 0.57 and 0.86 against *Cym.* and all three
+    name it.
+
+    Supporters first, then the score, so the agreed word wins over a better
+    match that stands alone.
+    """
+    by_name: dict[str, list[float]] = {}
+    for reading in readings:
+        name, ratio = likeness(reading)
+        if name:
+            by_name.setdefault(name, []).append(ratio)
+    if not by_name:
+        return "", 0.0
+    name = max(by_name, key=lambda k: (len(by_name[k]), max(by_name[k])))
+    if len(by_name[name]) < 2:
+        return "", 0.0
+    return name, max(by_name[name])
 
 
 def _merge(markings: list[Marking], space: float) -> list[Marking]:
