@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Sequence
 
-from . import barnum, crop, marks as marks_mod, score_xml
+from . import barnum, crop, marks as marks_mod, score_xml, words
 from .reconcile import (
     bars_from_numbers, drop_what_the_page_denies, numbers_are_worth_using,
     reconcile, staves_by_page,
@@ -83,6 +83,9 @@ class RetypeResult:
     bars_by_page: dict[int, int] = field(default_factory=dict)
     proof_pdf: Path | None = None
     guessed: list[int] = field(default_factory=list)
+    # Bars where the page has a word beside the staff that the fresh part does
+    # not carry — an instrument change, a "solo".  See `sheeets.words`.
+    markings: list[int] = field(default_factory=list)
 
     @property
     def bad_measures(self) -> list[MeasureCheck]:
@@ -136,6 +139,7 @@ class RetypeResult:
                 }
                 for span in self.spans
             ],
+            "markings_to_add": self.markings,
             "suspect_measures": [
                 {"measure": c.number, "score_page": self.page_of(c.number),
                  "adds_up_to": str(c.beats), "should_be": str(c.expected)}
@@ -255,6 +259,13 @@ def retype(
     # many bars each system holds.  Read before recognition because the count
     # is worth reporting whether or not an engine is any good.
     staff_of_page = staves_by_page(extraction)
+    unread = _markings_not_carried(extraction, staff_of_page)
+    if unread:
+        say(f"{len(unread)} marking(s) printed around the staff — instrument "
+            f"changes and the like — are not carried into the fresh part; the "
+            f"extracted part has them. Bars: "
+            + ", ".join(str(bar) for bar in unread[:12])
+            + (" …" if len(unread) > 12 else ""))
     facts = barnum.survey(extraction.detected, staff_of_page)
     if not numbers_are_worth_using(facts):
         facts, wanted = [], {}
@@ -446,6 +457,7 @@ def retype(
         spans=spans,
         bars_by_page=bars_by_page,
         guessed=guessed,
+        markings=unread,
     )
     if proof:
         from .proof import write_proof
@@ -581,3 +593,27 @@ def _rasterise_source(
 def _brief(exc: Exception) -> str:
     text = str(exc).strip().splitlines()
     return text[-1][:200] if text else exc.__class__.__name__
+
+
+def _markings_not_carried(extraction: Extraction, staff_of_page) -> list[int]:
+    """Which bars have something written beside the staff that the retype drops.
+
+    Recognition does not read these, and neither does `sheeets.words` — the
+    measurement for why not is in that module.  What can honestly be said is
+    *where* they are, and that is worth saying: it is the difference between a
+    part the player must check against the original everywhere and one where
+    they know the dozen bars to look at.
+    """
+    at: set[int] = set()
+    before = 0
+    for page in extraction.detected:
+        index = staff_of_page.get(page.page.index, -1)
+        for system in page.systems:
+            if not system.staves:
+                continue
+            staff = system.staves[index if 0 <= index < len(system.staves) else -1]
+            columns = system_barlines(page, system)
+            for marking in words.find(page.image, staff):
+                at.add(before + sum(1 for c in columns if c < marking.x) + 1)
+            before += max(1, len(columns))
+    return sorted(at)
